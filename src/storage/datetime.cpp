@@ -1,0 +1,274 @@
+#include <cstdio>
+#include <time.h>
+#include <casket/storage/datetime.hpp>
+#include <casket/utils/string.hpp>
+#include <casket/utils/to_number.hpp>
+
+namespace casket::storage {
+
+TimeStruct::TimeStruct(time_t t) {
+    if (!t)
+        t = time(NULL);
+    localtime_r(&t, &mytm);
+}
+int TimeStruct::day() const {
+    return mytm.tm_mday;
+}
+int TimeStruct::dayOfWeek() const {
+    return mytm.tm_wday;
+}
+int TimeStruct::dayOfYear() const {
+    return mytm.tm_yday;
+}
+int TimeStruct::month() const {
+    return mytm.tm_mon + 1;
+}
+int TimeStruct::year() const {
+    return mytm.tm_year + 1900;
+}
+int TimeStruct::hour() const {
+    return mytm.tm_hour;
+}
+int TimeStruct::min() const {
+    return mytm.tm_min;
+}
+int TimeStruct::sec() const {
+    return mytm.tm_sec;
+}
+time_t TimeStruct::timeStamp() const {
+    return mktime(const_cast<struct tm*>(&mytm));
+}
+TimeStruct& TimeStruct::setDay(int day) {
+    mytm.tm_mday = day;
+    return *this;
+}
+TimeStruct& TimeStruct::setMonth(int month) {
+    mytm.tm_mon = month - 1;
+    return *this;
+}
+TimeStruct& TimeStruct::setYear(int year) {
+    mytm.tm_year = year - 1900;
+    return *this;
+}
+TimeStruct& TimeStruct::setHour(int hour) {
+    mytm.tm_hour = hour;
+    return *this;
+}
+TimeStruct& TimeStruct::setMin(int min) {
+    mytm.tm_min = min;
+    return *this;
+}
+TimeStruct& TimeStruct::setSec(int sec) {
+    mytm.tm_sec = sec;
+    return *this;
+}
+TimeStruct& TimeStruct::setTimeStamp(time_t t) {
+    localtime_r(&t, &mytm);
+    return *this;
+}
+
+Date::Date(time_t t)
+    : value(t) {
+    if (value == 0)
+        value = time(NULL);
+}
+Date::Date(int day, int month, int year) {
+    value = TimeStruct().setDay(day).setMonth(month).setYear(year).timeStamp();
+}
+int Date::day() const {
+    return TimeStruct(value).day();
+}
+int Date::dayOfWeek() const {
+    return TimeStruct(value).dayOfWeek();
+}
+int Date::month() const {
+    return TimeStruct(value).month();
+}
+int Date::year() const {
+    return TimeStruct(value).year();
+}
+time_t Date::timeStamp() const {
+    return value;
+}
+TimeStruct Date::timeStruct() const {
+    return TimeStruct(value);
+}
+Date& Date::setDay(int d) {
+    value = TimeStruct(value).setDay(d).timeStamp();
+    return *this;
+}
+Date& Date::setMonth(int m) {
+    value = TimeStruct(value).setMonth(m).timeStamp();
+    return *this;
+}
+Date& Date::setYear(int y) {
+    value = TimeStruct(value).setYear(y).timeStamp();
+    return *this;
+}
+Date& Date::setTimeStamp(time_t t) {
+    value = t;
+    return *this;
+}
+
+std::string Date::toString(const std::string& format) const {
+    if (format == "%u") {
+        char buf[32];
+        snprintf(buf, 32, "%lu", value);
+        return buf;
+    }
+    auto data = utils::split(format, "%");
+    TimeStruct ts(value);
+    std::string res = data[0];
+    for (size_t i = 1; i < data.size(); i++) {
+        std::string rest = data[i].substr(1, data[i].size());
+        switch (data[i][0]) {
+        case 'd':
+            res += storage::toString(ts.day()) + rest;
+            break;
+        case 'm':
+            res += storage::toString(ts.month()) + rest;
+            break;
+        case 'y':
+            res += storage::toString(ts.year()) + rest;
+        }
+    }
+    return res;
+}
+DateTime::DateTime(time_t t) {
+    value = (t == 0) ? time(NULL) : t;
+}
+
+int DateTime::day() const {
+    return timeStruct().day();
+}
+
+int DateTime::month() const {
+    return timeStruct().month();
+}
+
+int DateTime::year() const {
+    return timeStruct().year();
+}
+
+int DateTime::hour() const {
+    return timeStruct().hour();
+}
+
+int DateTime::min() const {
+    return timeStruct().min();
+}
+
+int DateTime::sec() const {
+    return timeStruct().sec();
+}
+
+time_t DateTime::timeStamp() const {
+    return value;
+}
+
+TimeStruct DateTime::timeStruct() const {
+    return TimeStruct(value);
+}
+
+DateTime& DateTime::setDay(int d) {
+    value = TimeStruct(value).setDay(d).timeStamp();
+    return *this;
+}
+DateTime& DateTime::setMonth(int m) {
+    value = TimeStruct(value).setMonth(m).timeStamp();
+    return *this;
+}
+DateTime& DateTime::setYear(int y) {
+    value = TimeStruct(value).setYear(y).timeStamp();
+    return *this;
+}
+DateTime& DateTime::setHour(int h) {
+    value = TimeStruct(value).setHour(h).timeStamp();
+    return *this;
+}
+DateTime& DateTime::setMin(int m) {
+    value = TimeStruct(value).setMin(m).timeStamp();
+    return *this;
+}
+DateTime& DateTime::setSec(int s) {
+    value = TimeStruct(value).setSec(s).timeStamp();
+    return *this;
+}
+
+std::string DateTime::toString(const std::string& format) const {
+    if (format == "%u") {
+        char buf[32];
+        snprintf(buf, 32, "%lu", value);
+        return buf;
+    }
+    auto data = utils::split(format, "%");
+    TimeStruct ts(value);
+    auto res = data[0];
+    for (size_t i = 1; i < data.size(); i++) {
+        auto rest = data[i].substr(1, data[i].size());
+        switch (data[i][0]) {
+        case 'd':
+            res += storage::toString(ts.day()) + rest;
+            break;
+        case 'm':
+            res += storage::toString(ts.month()) + rest;
+            break;
+        case 'y':
+            res += storage::toString(ts.year()) + rest;
+            break;
+        case 'h':
+            res += storage::toString(ts.hour()) + rest;
+            break;
+        case 'M':
+            if (ts.min() < 10)
+                res += "0";
+            res += storage::toString(ts.min()) + rest;
+            break;
+        case 's':
+            if (ts.sec() < 10)
+                res += "0";
+            res += storage::toString(ts.sec()) + rest;
+            break;
+        }
+    }
+    return res;
+}
+template <>
+Date convert<const std::string&, Date>(const std::string& value) {
+    return Date(utils::toNumber<time_t>(value));
+}
+template <>
+DateTime convert<const std::string&, DateTime>(const std::string& value) {
+    return DateTime(utils::toNumber<time_t>(value));
+}
+template <>
+Date convert<int, Date>(int value) {
+    return Date(value);
+}
+template <>
+DateTime convert<int, DateTime>(int value) {
+    return DateTime(value);
+}
+
+template <>
+DateTime convert<time_t, DateTime>(time_t value) {
+    return DateTime(value);
+}
+
+template <>
+std::string convert<const Date&, std::string>(const Date& value) {
+    return toString(value.timeStamp());
+}
+template <>
+std::string convert<const DateTime&, std::string>(const DateTime& value) {
+    return toString(value.timeStamp());
+}
+
+std::ostream& operator<<(std::ostream& os, const Date& d) {
+    return os << d.toString();
+}
+
+std::ostream& operator<<(std::ostream& os, const DateTime& d) {
+    return os << d.toString();
+}
+} // namespace casket::storage

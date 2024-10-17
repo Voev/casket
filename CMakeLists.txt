@@ -9,7 +9,7 @@ project(casket
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
 # Custom options
-option (ENABLE_UNIT_TESTS "Enable unit tests" OFF)
+option (ENABLE_UNIT_TESTS "Enable unit tests" ON)
 option (ENABLE_CODE_COVERAGE "Enable code coverage" OFF)
 
 # Include CMake modules
@@ -26,6 +26,7 @@ include_directories(${PROJECT_SOURCE_DIR}/include)
 
 # Entry point for sources
 add_subdirectory(src)
+add_subdirectory(gen)
 
 # Test options
 if (ENABLE_UNIT_TESTS)

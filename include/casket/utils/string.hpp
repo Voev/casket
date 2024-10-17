@@ -19,7 +19,20 @@ inline bool iequals(std::string_view a, std::string_view b)
     return std::equal(a.begin(), a.end(), b.begin(), b.end(), compare);
 }
 
-inline std::vector<std::string> split(const std::string& str, const std::string& delim)
+inline std::string replace(const std::string& s, const std::string& what, const std::string& with) {
+    std::string data = s;
+
+    size_t pos = data.find(what);
+    while (pos != std::string::npos) {
+        data.replace(pos, what.size(), with);
+        pos = data.find(what, pos + with.size());
+    }
+
+    return data;
+}
+
+inline std::vector<std::string> split(const std::string& str,
+                                      const std::string& delim)
 {
     size_t start = 0;
     size_t end = std::string::npos;
@@ -36,6 +49,21 @@ inline std::vector<std::string> split(const std::string& str, const std::string&
     }
 
     res.push_back(str.substr(start));
+    return res;
+}
+
+inline std::string join(const std::vector<std::string>& strings,
+                        const std::string& delim)
+{
+    std::string res;
+    for (auto it = strings.cbegin(); it != strings.cend(); ++it)
+    {
+        if (it != strings.begin())
+        {
+            res.append(delim);
+        }
+        res.append(*it);
+    }
     return res;
 }
 

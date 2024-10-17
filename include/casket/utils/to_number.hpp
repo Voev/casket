@@ -10,22 +10,25 @@ namespace casket::utils
 {
 
 template <typename T>
-inline void to_number(std::string_view value, T& result, std::error_code& ec)
+inline T toNumber(std::string_view value, std::error_code& ec)
 {
     static_assert(std::is_integral_v<T> == true);
+    T result{};
     auto r = std::from_chars(value.data(), value.data() + value.size(), result);
     if (r.ec != std::errc())
     {
         ec = std::make_error_code(r.ec);
     }
+    return result;
 }
 
 template <typename T>
-inline void to_number(std::string_view value, T& result)
+inline T toNumber(std::string_view value)
 {
     std::error_code ec;
-    to_number<T>(value, result, ec);
+    auto result = toNumber<T>(value, ec);
     utils::ThrowIfError(ec);
+    return result;
 }
 
 } // namespace casket::utils
