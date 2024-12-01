@@ -46,18 +46,18 @@ inline uint8_t char2digit(const char ch) {
         default:
             throw RuntimeError("invalid hexadecimal symbol");
     }
-};
+}
 
-std::string hexlify(std::span<const uint8_t> in) {
+std::string hexlify(const std::uint8_t* bytes, std::size_t size) {
     static const uint8_t kHexMap[16] = {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f'};
 
     std::string out;
-    out.resize(in.size() * 2);
+    out.resize(size * 2);
 
-    for (size_t i = 0, j = 0; i < in.size() && j < out.size(); ++i) {
-        out[j++] = kHexMap[(in[i] >> 4)];
+    for (size_t i = 0, j = 0; i < size && j < out.size(); ++i) {
+        out[j++] = kHexMap[(bytes[i] >> 4)];
         if (j < out.size()) {
-            out[j++] = kHexMap[in[i] & 0xF];
+            out[j++] = kHexMap[bytes[i] & 0xF];
         }
     }
 
