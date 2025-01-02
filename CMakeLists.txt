@@ -10,12 +10,13 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
 # Custom options
 option (ENABLE_UNIT_TESTS "Enable unit tests" ON)
-option (ENABLE_CODE_COVERAGE "Enable code coverage" ON)
+option (ENABLE_CODE_COVERAGE "Enable code coverage" OFF)
 
 # Include CMake modules
 include(ConfigureCompiler)
 include(FindPackages)
 include(CodeCoverage)
+
 
 # Configure result directories
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
