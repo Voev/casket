@@ -10,9 +10,11 @@ class Queue
 {
     struct Node
     {
+        Node() = default;
+
         AtomicSharedPtr<Node> next;
         T data;
-        std::atomic_flag consumed{ATOMIC_FLAG_INIT};
+        std::atomic_flag consumed = ATOMIC_FLAG_INIT;
     };
 
 public:

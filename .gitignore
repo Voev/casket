@@ -1,6 +1,9 @@
 # VSCode settings
 .vscode
 
+# CMake
+CMakeUserPresets.json
+
 # Build directory
 build
 

@@ -1,5 +1,5 @@
 # Application name
-set(TEST_NAME casket_event_test)
+set(TEST_NAME test_server)
 
 # Sources
 file(GLOB_RECURSE SOURCES *.cpp)
