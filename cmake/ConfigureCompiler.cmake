@@ -68,18 +68,32 @@ option(ENABLE_ADDRESS_SANITIZER "enable address sanitizer support" OFF)
 option(ENABLE_UB_SANITIZER "enable undefined behavior sanitizer support" OFF)
 option(ENABLE_THREAD_SANITIZER "enable thread sanitizer support" OFF)
 
-if(ENABLE_PEDANTIC)
-    add_compiler_flag(-Wpedantic)
-endif(ENABLE_PEDANTIC)
+if (MSVC)
 
-if (ENABLE_STRICT)
-    add_compiler_flag(-Wall)
-    add_compiler_flag(-Wextra)
-endif (ENABLE_STRICT)
+    if (ENABLE_STRICT)
+        add_compiler_flag(/W4)
+    endif (ENABLE_STRICT)
 
-if (ENABLE_WERROR)
-    add_compiler_flag(-Werror) 
-endif (ENABLE_WERROR)
+    #if (ENABLE_WERROR)
+    #    add_compiler_flag(/WX)
+    #endif (ENABLE_WERROR)
+
+else()
+
+    if(ENABLE_PEDANTIC)
+        add_compiler_flag(-Wpedantic)
+    endif(ENABLE_PEDANTIC)
+
+    if (ENABLE_STRICT)
+        add_compiler_flag(-Wall)
+        add_compiler_flag(-Wextra)
+    endif (ENABLE_STRICT)
+
+    if (ENABLE_WERROR)
+        add_compiler_flag(-Werror) 
+    endif (ENABLE_WERROR)
+
+endif()
 
 if (CMAKE_GENERATOR STREQUAL "Unix Makefiles")
   set(CMAKE_COLOR_MAKEFILE ON)
