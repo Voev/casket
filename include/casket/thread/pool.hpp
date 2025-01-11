@@ -1,6 +1,7 @@
 #pragma once
 #include <vector>
 #include <thread>
+#include <future>
 #include <functional>
 #include <casket/lock_free/queue.hpp>
 #include <iostream>
@@ -20,9 +21,9 @@ public:
         }
     }
 
-    ~ThreadPool()
+    ~ThreadPool() noexcept
     {
-        enqueue([this]() { this->stop_.store(true); });
+        addTask([this]() { this->stop_.store(true); });
 
         for (auto& worker : workers_)
         {
@@ -36,9 +37,22 @@ public:
     ThreadPool& operator=(const ThreadPool&) = delete;
     ThreadPool& operator=(ThreadPool&&) noexcept = delete;
 
-    void enqueue(std::function<void()> task)
+    void addTask(std::function<void()> task)
     {
         tasks_.push(std::move(task));
+    }
+
+    template <typename Func, typename... Args>
+    void add(Func&& func, Args&&... args)
+    {
+        using return_type = std::invoke_result_t<Func, Args...>;
+        using packaged_task_type = std::packaged_task<return_type(Args && ...)>;
+
+        packaged_task_type task(std::forward<Func>(func));
+
+        addTask([&] { task(std::forward<Args>(args)...); });
+
+        return task.get_future().get();
     }
 
 private:

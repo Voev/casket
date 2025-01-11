@@ -18,7 +18,7 @@ TEST(ThreadPoolTest, BasicFunctionality)
 
     for (int i = 0; i < 10; ++i)
     {
-        pool.enqueue(task);
+        pool.addTask(task);
     }
 
     std::this_thread::sleep_for(1s);
@@ -26,17 +26,38 @@ TEST(ThreadPoolTest, BasicFunctionality)
     EXPECT_EQ(counter.load(), 10);
 }
 
-TEST(ThreadPoolTest, EnqueueTasks)
+TEST(ThreadPoolTest, AddTask)
 {
     ThreadPool pool(2);
     std::atomic<int> result = 0;
 
-    pool.enqueue([&result]() {
+    pool.addTask([&result]() {
         std::this_thread::sleep_for(100ms);
         result.fetch_add(1);
     });
 
-    pool.enqueue([&result]() {
+    pool.addTask([&result]() {
+        std::this_thread::sleep_for(150ms);
+        result.fetch_add(2);
+    });
+
+    std::this_thread::sleep_for(300ms);
+
+    EXPECT_EQ(result.load(), 3);
+}
+
+
+TEST(ThreadPoolTest, Add)
+{
+    ThreadPool pool(2);
+    std::atomic<int> result = 0;
+
+    pool.add([&result]() {
+        std::this_thread::sleep_for(100ms);
+        result.fetch_add(1);
+    });
+
+    pool.add([&result]() {
         std::this_thread::sleep_for(150ms);
         result.fetch_add(2);
     });
@@ -53,7 +74,7 @@ TEST(ThreadPoolTest, DestructorWaitsForTasks)
     {
         ThreadPool pool(1);
 
-        pool.enqueue([&taskFinished]() {
+        pool.addTask([&taskFinished]() {
             std::this_thread::sleep_for(200ms);
             taskFinished.store(true);
         });

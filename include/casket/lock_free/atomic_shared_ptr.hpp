@@ -398,8 +398,6 @@ bool AtomicSharedPtr<T>::compareExchange(T* expected, SharedPtr<T>&& newOne)
 template <typename T>
 void AtomicSharedPtr<T>::destroyOldControlBlock(size_t oldPackedPtr)
 {
-    //    assert((oldPackedPtr & MAGIC_MASK) == 0);
-
     auto block = reinterpret_cast<ControlBlock<T>*>(oldPackedPtr >> MAGIC_LEN);
     auto refCountBefore = block->refCount.fetch_sub(1);
 
