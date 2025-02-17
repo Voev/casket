@@ -3,8 +3,9 @@
 #include <thread>
 #include <future>
 #include <functional>
-#include <casket/lock_free/queue.hpp>
-#include <iostream>
+#include <condition_variable>
+#include <mutex>
+#include <deque>
 
 namespace casket::thread
 {
@@ -12,8 +13,12 @@ namespace casket::thread
 class ThreadPool final
 {
 public:
+    /// @brief Constructs a ThreadPool with a specified number of threads.
+    /// @param threads The number of threads in the pool.
+    ///
+    /// Initializes the thread pool with a given number of worker threads.
     explicit ThreadPool(std::size_t threads)
-        : stop_(false)
+        : stopped_(false)
     {
         for (std::size_t i = 0; i < threads; ++i)
         {
@@ -21,14 +26,12 @@ public:
         }
     }
 
+    /// @brief Destructor for the ThreadPool.
+    ///
+    /// Ensures all threads complete their current tasks and stop gracefully.
     ~ThreadPool() noexcept
     {
-        addTask([this]() { this->stop_.store(true); });
-
-        for (auto& worker : workers_)
-        {
-            worker.join();
-        }
+        stop();
     }
 
     ThreadPool(const ThreadPool&) = delete;
@@ -37,41 +40,94 @@ public:
     ThreadPool& operator=(const ThreadPool&) = delete;
     ThreadPool& operator=(ThreadPool&&) noexcept = delete;
 
-    void addTask(std::function<void()> task)
+    /// @brief Adds a new task to the thread pool.
+    /// @param task A function to be executed by the thread pool.
+    ///
+    /// The function is added to the internal task queue and will be
+    /// executed by the first available worker thread.
+    void add(std::function<void()> task)
     {
-        tasks_.push(std::move(task));
+        tasks_.emplace_back(std::move(task));
     }
 
-    template <typename Func, typename... Args>
-    void add(Func&& func, Args&&... args)
+    /// @brief Submits a task for execution and returns a future for its result.
+    /// @param func The function to execute.
+    /// @param args Arguments to pass to the function.
+    /// @return A future which will hold the result of the task.
+    template <class Func, class... Args>
+    auto run(Func&& func, Args&&... args) -> std::future<std::invoke_result_t<Func, Args...>>
     {
         using return_type = std::invoke_result_t<Func, Args...>;
-        using packaged_task_type = std::packaged_task<return_type(Args && ...)>;
 
-        packaged_task_type task(std::forward<Func>(func));
+        auto future_work = std::bind(std::forward<Func>(func), std::forward<Args>(args)...);
+        auto task = std::make_shared<std::packaged_task<return_type()>>(future_work);
 
-        addTask([&] { task(std::forward<Args>(args)...); });
+        auto result = task->get_future();
+        add([task]() { (*task)(); });
+        return result;
+    }
 
-        return task.get_future().get();
+    void stop() noexcept
+    {
+        {
+            std::unique_lock<std::mutex> lock(mutex_);
+            if (stopped_ == true)
+            {
+                return;
+            }
+            stopped_ = true;
+            cv_.notify_all();
+        }
+
+        for (auto&& thread : workers_)
+        {
+            thread.join();
+        }
+
+        workers_.clear();
     }
 
 private:
+    /// @brief Main function for each worker thread.
+    ///
+    /// Each worker thread fetches tasks from the queue and executes them
+    /// until the stop flag is set.
     void workerThread()
     {
-        do
+        for (;;)
         {
-            auto task = tasks_.pop();
-            if (task.has_value())
+            std::function<void()> task;
+
             {
-                task.value()();
+                std::unique_lock<std::mutex> lock(mutex_);
+                cv_.wait(lock, [this] { return stopped_ || !tasks_.empty(); });
+
+                if (tasks_.empty())
+                {
+                    if (stopped_)
+                    {
+                        return;
+                    }
+                    else
+                    {
+                        continue;
+                    }
+                }
+
+                task = tasks_.front();
+                tasks_.pop_front();
             }
-        } while (!stop_.load());
+
+            task();
+        }
     }
 
 private:
     std::vector<std::thread> workers_;
-    lock_free::Queue<std::function<void()>> tasks_;
-    std::atomic<bool> stop_;
+    std::condition_variable cv_;
+    std::mutex mutex_;
+    std::deque<std::function<void()>> tasks_;
+    bool stopped_;
 };
 
 } // namespace casket::thread
