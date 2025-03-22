@@ -1,5 +1,8 @@
 #pragma once
 #include <algorithm>
+#include <cctype>
+#include <vector>
+#include <string>
 #include <string_view>
 
 namespace casket::utils
