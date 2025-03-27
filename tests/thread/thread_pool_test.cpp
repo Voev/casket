@@ -96,7 +96,7 @@ TEST(ThreadPoolTest, DestructorWaitsForTasks)
 TEST(ThreadPoolTest, SingleTask)
 {
     ThreadPool pool(2);
-    auto future = pool.run([] { return 42; });
+    auto future = pool.add([] { return 42; });
     ASSERT_EQ(future.get(), 42);
 }
 
@@ -106,7 +106,7 @@ TEST(ThreadPoolTest, MultipleTasks)
     std::vector<std::future<int>> futures;
     for (int i = 0; i < 10; ++i)
     {
-        futures.emplace_back(pool.run([i] { return i * i; }));
+        futures.emplace_back(pool.add([i] { return i * i; }));
     }
 
     for (int i = 0; i < 10; ++i)
@@ -124,7 +124,7 @@ TEST(ThreadPoolTest, ConcurrentExecution)
 
     for (int i = 0; i < numTasks; ++i)
     {
-        futures.emplace_back(pool.run([&counter] { counter.fetch_add(1, std::memory_order_relaxed); }));
+        futures.emplace_back(pool.add([&counter] { counter.fetch_add(1, std::memory_order_relaxed); }));
     }
 
     for (auto& future : futures)
