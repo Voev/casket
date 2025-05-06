@@ -1,12 +1,13 @@
 #include <gtest/gtest.h>
-#include <casket/opt/option_parser.hpp>
+#include <casket/opt/option_builder.hpp>
+#include <casket/opt/cmd_line_options_parser.hpp>
 
 using namespace casket::opt;
 
 TEST(TypedValueTest, ParseIntegerSuccess)
 {
     int valueStorage = 0;
-    detail::TypedValue<int> intValue(&valueStorage);
+    TypedValueHandler<int> intValue(&valueStorage);
 
     std::any value;
     std::vector<std::string_view> args = {"42"};
@@ -21,7 +22,7 @@ TEST(TypedValueTest, ParseIntegerSuccess)
 TEST(TypedValueTest, ParseIntegerFailure)
 {
     int valueStorage = 0;
-    detail::TypedValue<int> intValue(&valueStorage);
+    TypedValueHandler<int> intValue(&valueStorage);
 
     std::any value;
     std::vector<std::string_view> args = {"not_a_number"};
@@ -34,7 +35,7 @@ TEST(TypedValueTest, ParseIntegerFailure)
 TEST(TypedValueTest, ParseDoubleSuccess)
 {
     double valueStorage = 0.0;
-    detail::TypedValue<double> doubleValue(&valueStorage);
+    TypedValueHandler<double> doubleValue(&valueStorage);
 
     std::any value;
     std::vector<std::string_view> args = {"3.14"};
@@ -49,7 +50,7 @@ TEST(TypedValueTest, ParseDoubleSuccess)
 TEST(TypedValueTest, ParseStringSuccess)
 {
     std::string valueStorage;
-    detail::TypedValue<std::string> stringValue(&valueStorage);
+    TypedValueHandler<std::string> stringValue(&valueStorage);
 
     std::any value;
     std::vector<std::string_view> args = {"hello"};
@@ -64,115 +65,101 @@ TEST(TypedValueTest, ParseStringSuccess)
 TEST(TypedValueTest, TokensCount)
 {
     int valueStorage = 0;
-    detail::TypedValue<int> intValue(&valueStorage);
+    TypedValueHandler<int> intValue(&valueStorage);
 
     EXPECT_EQ(intValue.minTokens(), 1U);
     EXPECT_EQ(intValue.maxTokens(), 1U);
 }
 
-TEST(OptionTest, EmptyOptionName)
+TEST(EmptyOptionTest, ThrowException)
 {
-    ASSERT_THROW(Option("", "Invalid option"), std::runtime_error);
+    ASSERT_THROW(Option(""), std::runtime_error);
 }
 
-TEST(OptionTest, InvalidOptionAliasName)
-{
-    ASSERT_THROW(Option("foo,", "Invalid option"), std::runtime_error);
-}
-
-class OptionParserTest : public ::testing::Test
+class CmdLineOptionsParserTest : public ::testing::Test
 {
 protected:
-    OptionParser parser;
+    CmdLineOptionsParser parser;
 };
 
-TEST_F(OptionParserTest, RequiredOptionNotSpecified)
+TEST_F(CmdLineOptionsParserTest, RequiredOptionNotSpecified)
 {
-    ASSERT_NO_THROW(parser.add("foo", "Foo option").required());
+    ASSERT_NO_THROW(parser.add(OptionBuilder("foo").setRequired().build()));
 
     ASSERT_THROW(parser.parse({}), std::runtime_error);
 }
 
-TEST_F(OptionParserTest, AttemptToGetOptionBeforeParsing)
+TEST_F(CmdLineOptionsParserTest, AttemptToGetOptionBeforeParsing)
 {
-    ASSERT_NO_THROW(parser.add("foo", "Foo option").required());
+    ASSERT_NO_THROW(parser.add(OptionBuilder("foo").setRequired().build()));
 
     ASSERT_THROW(parser.get("fooo"), std::logic_error);
 }
 
-TEST_F(OptionParserTest, NonExistentOption)
+TEST_F(CmdLineOptionsParserTest, NonExistentOption)
 {
-    ASSERT_NO_THROW(parser.add("foo", "Foo option"));
+    ASSERT_NO_THROW(parser.add(Option("foo")));
 
     ASSERT_NO_THROW(parser.parse({}));
 
     ASSERT_THROW(parser.get("fooo"), std::runtime_error);
 }
 
-TEST_F(OptionParserTest, NotEnoughArguments)
+TEST_F(CmdLineOptionsParserTest, NotEnoughArguments)
 {
-    ASSERT_NO_THROW(parser.add("foo", Value<int>(), "Foo option"));
+    ASSERT_NO_THROW(parser.add(Option("foo", Value<int>())));
 
     ASSERT_THROW(parser.parse({"--foo"}), std::runtime_error);
 }
 
-TEST_F(OptionParserTest, TooManyArguments)
+TEST_F(CmdLineOptionsParserTest, TooManyArguments)
 {
-    ASSERT_NO_THROW(parser.add("foo", "Foo option"));
+    ASSERT_NO_THROW(parser.add(Option("foo")));
 
     ASSERT_THROW(parser.parse({"--foo", "foo1", "foo2"}), std::runtime_error);
 }
 
-TEST_F(OptionParserTest, DuplicatedOption)
+TEST_F(CmdLineOptionsParserTest, DuplicatedOption)
 {
-    ASSERT_NO_THROW(parser.add("foo", "Foo option"));
+    ASSERT_NO_THROW(parser.add(Option("foo")));
 
     ASSERT_THROW(parser.parse({"--foo", "--foo"}), std::runtime_error);
 }
 
-TEST_F(OptionParserTest, AddOptionWithoutValue)
+TEST_F(CmdLineOptionsParserTest, AddOptionWithoutValue)
 {
-    ASSERT_NO_THROW(parser.add("help", "Displays help information"));
+    ASSERT_NO_THROW(parser.add(Option("help")));
 
     ASSERT_NO_THROW(parser.parse({"--help"}););
 
     ASSERT_TRUE(parser.isUsed("help"));
 }
 
-TEST_F(OptionParserTest, AddOptionWithValue)
+TEST_F(CmdLineOptionsParserTest, AddOptionWithValue)
 {
     int intValue{};
-    
-    ASSERT_NO_THROW(parser.add("port", Value(&intValue), "Sets the port to connect to"));
+
+    ASSERT_NO_THROW(parser.add(Option("port", Value(&intValue))));
 
     ASSERT_NO_THROW(parser.parse({"--port=8080"}););
 
     ASSERT_EQ(parser.get<int>("port"), 8080);
 }
 
-TEST_F(OptionParserTest, UnknownOptionThrows)
+TEST_F(CmdLineOptionsParserTest, UnknownOptionThrows)
 {
     int intValue{};
-    
-    ASSERT_NO_THROW(parser.add("port", Value(&intValue), "Sets the port to connect to"));
+
+    ASSERT_NO_THROW(parser.add(Option("port", Value(&intValue))));
 
     ASSERT_THROW(parser.parse({"--unknown=1234"}), std::runtime_error);
 }
 
-TEST_F(OptionParserTest, OptionWithoutValueThrowsWhenGetting)
+TEST_F(CmdLineOptionsParserTest, OptionWithoutValueThrowsWhenGetting)
 {
-    ASSERT_NO_THROW(parser.add("help", "Displays help information"));
+    ASSERT_NO_THROW(parser.add(Option("help")));
 
     ASSERT_NO_THROW(parser.parse({"--help"}));
 
     ASSERT_THROW(parser.get<int>("help"), std::runtime_error);
-}
-
-TEST_F(OptionParserTest, OptionWithAndWithoutAlias)
-{
-    ASSERT_NO_THROW(parser.add("output,o", Value<std::string>(), "Specifies the output file"));
-
-    ASSERT_NO_THROW(parser.parse({"-o", "file.txt"}););
-
-    ASSERT_TRUE(parser.isUsed("output"));
 }
