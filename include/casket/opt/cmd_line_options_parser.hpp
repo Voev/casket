@@ -284,7 +284,6 @@ private:
 private:
     OptionList options_;                              ///< A list of defined options.
     std::map<std::string, OptionIterator> optionMap_; ///< A map from option names to their iterators.
-    std::string programName_;                         ///< The program name for usage instructions.
     bool parsed_{false};                              ///< Flag indicating whether parsing has been performed.
 };
 
