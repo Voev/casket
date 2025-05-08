@@ -5,6 +5,7 @@
 #include <casket/opt/config_options.hpp>
 #include <casket/utils/noncopyable.hpp>
 #include <casket/utils/string.hpp>
+#include <casket/utils/exception.hpp>
 
 namespace casket::opt
 {
@@ -102,10 +103,11 @@ private:
         try
         {
             section->parse(lines);
+            section->validate();
         }
         catch (std::exception& e)
         {
-            throw std::runtime_error(utils::format("[Section '{}'] {}", name, e.what()));
+            throw utils::RuntimeError("[Section '{}'] {}", name, e.what());
         }
     }
 };

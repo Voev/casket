@@ -7,6 +7,11 @@ class OptionTest : public ::testing::Test
 {
 };
 
+TEST_F(OptionTest, EmptyOption)
+{
+    ASSERT_THROW(Option(""), std::runtime_error);
+}
+
 TEST_F(OptionTest, DefaultConstructor)
 {
     Option opt("opt");
@@ -24,7 +29,7 @@ TEST_F(OptionTest, ConsumeOption)
 {
     Option opt("opt", Value<int>());
     std::vector<std::string> args = {"42"};
-    opt.consume(args.begin(), args.end());
+    opt.consume(args);
     EXPECT_EQ(opt.get<int>(), 42);
 }
 
@@ -32,21 +37,21 @@ TEST_F(OptionTest, ConsumeOptionWithTooFewArguments)
 {
     Option opt("opt", Value<int>());
     std::vector<std::string> args = {};
-    EXPECT_THROW(opt.consume(args.begin(), args.end()), std::runtime_error);
+    EXPECT_THROW(opt.consume(args), std::runtime_error);
 }
 
 TEST_F(OptionTest, ConsumeOptionWithTooManyArguments)
 {
     Option opt("opt", Value<int>());
     std::vector<std::string> args = {"42", "43"};
-    EXPECT_THROW(opt.consume(args.begin(), args.end()), std::runtime_error);
+    EXPECT_THROW(opt.consume(args), std::runtime_error);
 }
 
 TEST_F(OptionTest, GetOption)
 {
     Option opt("opt", Value<int>());
     std::vector<std::string> args = {"42"};
-    opt.consume(args.begin(), args.end());
+    opt.consume(args);
     EXPECT_EQ(opt.get<int>(), 42);
 }
 
@@ -54,7 +59,7 @@ TEST_F(OptionTest, PresentOption)
 {
     Option opt("opt", Value<int>());
     std::vector<std::string> args = {"42"};
-    opt.consume(args.begin(), args.end());
+    opt.consume(args);
     EXPECT_TRUE(opt.present<int>().has_value());
     EXPECT_EQ(opt.present<int>().value(), 42);
 }

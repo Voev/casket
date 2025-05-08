@@ -20,9 +20,17 @@ public:
             auto args = utils::split(line, " ");
             auto option = options_.find(args[0]);
             utils::ThrowIfTrue(option == options_.end(), "Unknown option: {}", args[0]);
-            option->second.consume(args.begin() + 1, args.end());
+            args.erase(args.begin());
+            option->second.consume(args);
         }
-        validate();
+    }
+    
+    void validate()
+    {
+        for (auto& [_, option] : options_)
+        {
+            option.validate();
+        }
     }
 
     void addOption(Option&& option)
@@ -39,13 +47,6 @@ public:
     }
 
 protected:
-    void validate()
-    {
-        for (auto& [_, option] : options_)
-        {
-            option.validate();
-        }
-    }
 
 private:
     std::unordered_map<std::string, Option> options_;

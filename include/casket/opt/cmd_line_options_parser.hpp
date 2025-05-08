@@ -36,8 +36,6 @@ private:
     {
         if (arg.size() > 2 && startsWith(arg, kDoublePrefix))
             return arg.substr(2);
-        if (arg.size() > 1 && startsWith(arg, kSinglePrefix))
-            return arg.substr(1);
         return arg;
     }
 
@@ -83,6 +81,18 @@ public:
     {
         auto allocatedArgs = preprocess(args);
         postprocess(allocatedArgs);
+    }
+
+    /// @brief Validate option values for each option:
+    /// - set default value if any
+    /// - check if option is mandatory
+    /// - set custom value
+    void validate()
+    {
+        for (auto& option : options_)
+        {
+            option.validate();
+        }
     }
 
     /// @brief Retrieves the stored value of an option.
@@ -134,7 +144,7 @@ public:
 
             ss << "  " << kDoublePrefix << option.getName();
 
-            if (option.getValueHandler()->minTokens() > 0U)
+            if (option.minTokens() > 0)
             {
                 ss << " arg";
             }
@@ -148,6 +158,8 @@ public:
 
             os << option.getDescription() << "\n";
         }
+
+        os << std::endl;
     }
 
 private:
@@ -160,7 +172,7 @@ private:
         auto it = optionMap_.find(name);
         if (it == optionMap_.end())
         {
-            throw std::runtime_error("No such option: " + std::string(name));
+            throw utils::RuntimeError("No such option '{}'", name);
         }
         return *(it->second);
     }
@@ -194,7 +206,7 @@ private:
         return result;
     }
 
-    /// @brief Processes preprocessed arguments to consume and validate them.
+    /// @brief Processes preprocessed arguments to consume.
     /// @param args The list of preprocessed arguments to postprocess.
     /// @throws std::runtime_error if an unknown option is encountered.
     void postprocess(const std::vector<std::string>& args)
@@ -206,20 +218,34 @@ private:
             auto foundOption = optionMap_.find(optionName);
             if (foundOption != optionMap_.end())
             {
-                auto nextOption = std::find_if(std::next(arg), end,
-                                               [](auto& x) { return startsWith(x, "--") || startsWith(x, "-"); });
-                foundOption->second->consume(std::next(arg), nextOption);
-                arg = nextOption;
+                auto nextArg = std::next(arg);
+                auto& option = foundOption->second;
+
+                std::vector<std::string> values;
+                while (nextArg != end && values.size() < option->maxTokens() && !startsWith(*nextArg, "--"))
+                {
+                    values.push_back(*nextArg);
+                    ++nextArg;
+                }
+
+                if (values.size() < option->minTokens())
+                {
+                    throw utils::RuntimeError("Option '{}' requires at least {} values", optionName,
+                                              option->minTokens());
+                }
+
+                if (option->maxTokens() > 0 && values.size() > option->maxTokens())
+                {
+                    throw utils::RuntimeError("Option '{}' accepts at most {} values", optionName, option->maxTokens());
+                }
+
+                option->consume(values);
+                arg = nextArg;
             }
             else
             {
-                throw std::runtime_error("Unknown option: " + std::string(optionName));
+                throw utils::RuntimeError("Unknown option '{}'", optionName);
             }
-        }
-
-        for (auto& option : options_)
-        {
-            option.validate();
         }
         parsed_ = true;
     }
@@ -229,9 +255,7 @@ private:
     /// @param usageName An optional program usage string.
     void usage(std::ostream& os, std::string_view usageName) const
     {
-        os << "Usage:\n";
-
-        os << "  " << usageName;
+        os << "Usage:\n  " << usageName;
 
         for (auto option : options_)
         {
@@ -244,7 +268,7 @@ private:
 
             os << kDoublePrefix << option.getName();
 
-            if (option.getValueHandler()->minTokens() > 0U)
+            if (option.minTokens() > 0)
             {
                 os << " arg";
             }

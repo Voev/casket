@@ -4,78 +4,6 @@
 
 using namespace casket::opt;
 
-TEST(TypedValueTest, ParseIntegerSuccess)
-{
-    int valueStorage = 0;
-    TypedValueHandler<int> intValue(&valueStorage);
-
-    std::any value;
-    std::vector<std::string_view> args = {"42"};
-
-    EXPECT_NO_THROW({ intValue.parse(value, args); });
-
-    EXPECT_EQ(std::any_cast<int>(value), 42);
-    intValue.notify(value);
-    EXPECT_EQ(valueStorage, 42);
-}
-
-TEST(TypedValueTest, ParseIntegerFailure)
-{
-    int valueStorage = 0;
-    TypedValueHandler<int> intValue(&valueStorage);
-
-    std::any value;
-    std::vector<std::string_view> args = {"not_a_number"};
-
-    EXPECT_THROW({ intValue.parse(value, args); }, std::runtime_error);
-
-    EXPECT_EQ(valueStorage, 0); // значение не должно измениться
-}
-
-TEST(TypedValueTest, ParseDoubleSuccess)
-{
-    double valueStorage = 0.0;
-    TypedValueHandler<double> doubleValue(&valueStorage);
-
-    std::any value;
-    std::vector<std::string_view> args = {"3.14"};
-
-    EXPECT_NO_THROW({ doubleValue.parse(value, args); });
-
-    EXPECT_DOUBLE_EQ(std::any_cast<double>(value), 3.14);
-    doubleValue.notify(value);
-    EXPECT_DOUBLE_EQ(valueStorage, 3.14);
-}
-
-TEST(TypedValueTest, ParseStringSuccess)
-{
-    std::string valueStorage;
-    TypedValueHandler<std::string> stringValue(&valueStorage);
-
-    std::any value;
-    std::vector<std::string_view> args = {"hello"};
-
-    EXPECT_NO_THROW({ stringValue.parse(value, args); });
-
-    EXPECT_EQ(std::any_cast<std::string>(value), "hello");
-    stringValue.notify(value);
-    EXPECT_EQ(valueStorage, "hello");
-}
-
-TEST(TypedValueTest, TokensCount)
-{
-    int valueStorage = 0;
-    TypedValueHandler<int> intValue(&valueStorage);
-
-    EXPECT_EQ(intValue.minTokens(), 1U);
-    EXPECT_EQ(intValue.maxTokens(), 1U);
-}
-
-TEST(EmptyOptionTest, ThrowException)
-{
-    ASSERT_THROW(Option(""), std::runtime_error);
-}
-
 class CmdLineOptionsParserTest : public ::testing::Test
 {
 protected:
@@ -86,14 +14,27 @@ TEST_F(CmdLineOptionsParserTest, RequiredOptionNotSpecified)
 {
     ASSERT_NO_THROW(parser.add(OptionBuilder("foo").setRequired().build()));
 
-    ASSERT_THROW(parser.parse({}), std::runtime_error);
+    ASSERT_NO_THROW(parser.parse({}));
+
+    ASSERT_THROW(parser.validate(), std::runtime_error);
+}
+
+TEST_F(CmdLineOptionsParserTest, RequiredOptionWithDefaultValue)
+{
+    ASSERT_NO_THROW(parser.add(OptionBuilder("foo").setDefaultValue(42).setRequired().build()));
+
+    ASSERT_NO_THROW(parser.parse({}));
+
+    ASSERT_NO_THROW(parser.validate());
+
+    ASSERT_EQ(42, parser.get<int>("foo"));
 }
 
 TEST_F(CmdLineOptionsParserTest, AttemptToGetOptionBeforeParsing)
 {
-    ASSERT_NO_THROW(parser.add(OptionBuilder("foo").setRequired().build()));
+    ASSERT_NO_THROW(parser.add(OptionBuilder("foo").build()));
 
-    ASSERT_THROW(parser.get("fooo"), std::logic_error);
+    ASSERT_THROW(parser.get("foo"), std::logic_error);
 }
 
 TEST_F(CmdLineOptionsParserTest, NonExistentOption)
@@ -112,11 +53,47 @@ TEST_F(CmdLineOptionsParserTest, NotEnoughArguments)
     ASSERT_THROW(parser.parse({"--foo"}), std::runtime_error);
 }
 
+TEST_F(CmdLineOptionsParserTest, NotEnoughArgumentsForOptionWithDefaultValue)
+{
+    ASSERT_NO_THROW(parser.add(OptionBuilder("foo", Value<int>()).setDefaultValue("42").build()));
+
+    ASSERT_THROW(parser.parse({"--foo"}), std::runtime_error);
+}
+
+TEST_F(CmdLineOptionsParserTest, UseDefaultValueWhenNotProvided)
+{
+    ASSERT_NO_THROW(parser.add(OptionBuilder("foo", Value<int>()).setDefaultValue(42).build()));
+
+    ASSERT_NO_THROW(parser.parse({}));
+
+    ASSERT_NO_THROW(parser.validate());
+
+    ASSERT_EQ(42, parser.get<int>("foo"));
+}
+
+TEST_F(CmdLineOptionsParserTest, GetProvidedValueInsteadOfDefaultValue)
+{
+    ASSERT_NO_THROW(parser.add(OptionBuilder("foo", Value<int>()).setDefaultValue(42).build()));
+
+    ASSERT_NO_THROW(parser.parse({"--foo", "43"}));
+
+    ASSERT_NO_THROW(parser.validate());
+
+    ASSERT_EQ(43, parser.get<int>("foo"));
+}
+
 TEST_F(CmdLineOptionsParserTest, TooManyArguments)
 {
     ASSERT_NO_THROW(parser.add(Option("foo")));
 
     ASSERT_THROW(parser.parse({"--foo", "foo1", "foo2"}), std::runtime_error);
+}
+
+TEST_F(CmdLineOptionsParserTest, PassOptionAsStringArgument)
+{
+    ASSERT_NO_THROW(parser.add(Option("foo", Value<std::string>())));
+
+    ASSERT_THROW(parser.parse({"--foo", "--foo1"}), std::runtime_error);
 }
 
 TEST_F(CmdLineOptionsParserTest, DuplicatedOption)
