@@ -3,85 +3,114 @@
 
 using namespace casket::opt;
 
+TEST(TypedValueHandlerTest, TokensCount)
+{
+    auto handler = Value<int>();
+    ASSERT_NE(handler, nullptr);
+
+    EXPECT_EQ(handler->minTokens(), 1);
+    EXPECT_EQ(handler->maxTokens(), 1);
+}
+
+TEST(TypedValueHandlerTest, NoStorageForValue)
+{
+    auto handler = Value<std::string>();
+    ASSERT_NE(handler, nullptr);
+
+    std::vector<std::string> args = {"hello"};
+
+    std::any anyValue;
+    ASSERT_NO_THROW(handler->parse(anyValue, args));
+
+    ASSERT_EQ(std::any_cast<std::string>(anyValue), args.front());
+}
+
+TEST(TypedValueHandlerTest, UseStorageForValue)
+{
+    std::string value = "hello";
+
+    auto handler = Value(&value);
+    ASSERT_NE(handler, nullptr);
+
+    std::vector<std::string> args = {value};
+
+    std::any anyValue;
+    ASSERT_NO_THROW(handler->parse(anyValue, args));
+    ASSERT_NO_THROW(handler->notify(anyValue));
+
+    ASSERT_EQ(value, args.front());
+}
+
 TEST(TypedValueHandlerTest, ParseIntegerSuccess)
 {
-    int valueStorage = 0;
-    TypedValueHandler<int> intValue(&valueStorage);
+    int value = 0;
+    auto handler = Value(&value);
 
-    std::any value;
     std::vector<std::string> args = {"42"};
 
-    EXPECT_NO_THROW({ intValue.parse(value, args); });
+    std::any anyValue;
+    ASSERT_NO_THROW(handler->parse(anyValue, args));
+    ASSERT_NO_THROW(handler->notify(anyValue));
 
-    EXPECT_EQ(std::any_cast<int>(value), 42);
-    intValue.notify(value);
-    EXPECT_EQ(valueStorage, 42);
+    ASSERT_EQ(value, 42);
 }
 
 TEST(TypedValueHandlerTest, ParseNegativeIntegerSuccess)
 {
-    int valueStorage = 0;
-    TypedValueHandler<int> intValue(&valueStorage);
+    int value = 0;
 
-    std::any value;
+    auto handler = Value(&value);
+    ASSERT_NE(handler, nullptr);
+
     std::vector<std::string> args = {"-42"};
 
-    EXPECT_NO_THROW({ intValue.parse(value, args); });
+    std::any anyValue;
+    ASSERT_NO_THROW(handler->parse(anyValue, args));
+    ASSERT_NO_THROW(handler->notify(anyValue));
 
-    EXPECT_EQ(std::any_cast<int>(value), -42);
-    intValue.notify(value);
-    EXPECT_EQ(valueStorage, -42);
+    ASSERT_EQ(value, -42);
 }
-
 
 TEST(TypedValueHandlerTest, ParseIntegerFailure)
 {
-    int valueStorage = 0;
-    TypedValueHandler<int> intValue(&valueStorage);
+    int value = 0;
 
-    std::any value;
+    auto handler = Value(&value);
+    ASSERT_NE(handler, nullptr);
+
     std::vector<std::string> args = {"not_a_number"};
 
-    EXPECT_THROW({ intValue.parse(value, args); }, std::runtime_error);
-
-    EXPECT_EQ(valueStorage, 0);
+    std::any anyValue;
+    ASSERT_THROW(handler->parse(anyValue, args), std::runtime_error);
 }
 
 TEST(TypedValueHandlerTest, ParseDoubleSuccess)
 {
-    double valueStorage = 0.0;
-    TypedValueHandler<double> doubleValue(&valueStorage);
+    double value = 0.0;
 
-    std::any value;
+    auto handler = Value(&value);
+    ASSERT_NE(handler, nullptr);
+
     std::vector<std::string> args = {"3.14"};
 
-    EXPECT_NO_THROW({ doubleValue.parse(value, args); });
+    std::any anyValue;
+    ASSERT_NO_THROW(handler->parse(anyValue, args));
+    ASSERT_NO_THROW(handler->notify(anyValue));
 
-    EXPECT_DOUBLE_EQ(std::any_cast<double>(value), 3.14);
-    doubleValue.notify(value);
-    EXPECT_DOUBLE_EQ(valueStorage, 3.14);
+    ASSERT_DOUBLE_EQ(value, 3.14);
 }
 
 TEST(TypedValueHandlerTest, ParseStringSuccess)
 {
-    std::string valueStorage;
-    TypedValueHandler<std::string> stringValue(&valueStorage);
+    std::string value;
+    auto handler = Value(&value);
+    ASSERT_NE(handler, nullptr);
 
-    std::any value;
     std::vector<std::string> args = {"hello"};
+    
+    std::any anyValue;
+    ASSERT_NO_THROW(handler->parse(anyValue, args));
+    ASSERT_NO_THROW(handler->notify(anyValue));
 
-    EXPECT_NO_THROW({ stringValue.parse(value, args); });
-
-    EXPECT_EQ(std::any_cast<std::string>(value), "hello");
-    stringValue.notify(value);
-    EXPECT_EQ(valueStorage, "hello");
-}
-
-TEST(TypedValueHandlerTest, TokensCount)
-{
-    int valueStorage = 0;
-    TypedValueHandler<int> intValue(&valueStorage);
-
-    EXPECT_EQ(intValue.minTokens(), 1);
-    EXPECT_EQ(intValue.maxTokens(), 1);
+    ASSERT_EQ(value, "hello");
 }
