@@ -6,6 +6,7 @@
 #include <sstream>
 #include <casket/opt/option_value_handler.hpp>
 #include <casket/utils/string.hpp>
+#include <casket/utils/exception.hpp>
 
 namespace casket::opt
 {
@@ -35,39 +36,40 @@ public:
     /// parsed.
     ///
     /// @throws std::runtime_error If the string cannot be parsed into type `T`.
-    void parse(std::any& value, const std::vector<std::string_view>& args) override
+    void parse(std::any& value, const std::vector<std::string>& args) override
     {
-        auto str = std::string(args.front());
-        std::istringstream iss{str};
-        T typedValue{};
+        utils::ThrowIfTrue(args.size() < minTokens(), "not enough arguments");
+        utils::ThrowIfTrue(args.size() > maxTokens(), "too many arguments");
 
-        using namespace casket::utils;
+        auto str = args.front();
+        T typedValue{};
 
         if constexpr (std::is_same_v<T, bool>)
         {
-            if (iequals(str, "true") || iequals(str, "yes"))
+            if (utils::iequals(str, "true") || utils::iequals(str, "yes"))
             {
                 typedValue = true;
             }
-            else if (iequals(str, "false") || iequals(str, "no"))
+            else if (utils::iequals(str, "false") || utils::iequals(str, "no"))
             {
                 typedValue = false;
             }
             else
             {
-                throw std::runtime_error("could not parse bool value: " + str);
+                throw utils::RuntimeError("could not parse bool value '{}'", str);
             }
             value = std::move(typedValue);
         }
         else
         {
+            std::istringstream iss(str.data());
             if (iss >> typedValue)
             {
                 value = std::move(typedValue);
             }
             else
             {
-                throw std::runtime_error("could not parse value: " + str);
+                throw utils::RuntimeError("could not parse value '{}'", str);
             }
         }
     }
@@ -96,7 +98,7 @@ public:
     /// @return Always returns 1.
     std::size_t minTokens() const override
     {
-        return 1U;
+        return 1;
     }
 
     /// @brief Returns the maximum number of tokens allowed for parsing.
@@ -107,7 +109,7 @@ public:
     /// @return Always returns 1.
     std::size_t maxTokens() const override
     {
-        return 1U;
+        return 1;
     }
 
 private:

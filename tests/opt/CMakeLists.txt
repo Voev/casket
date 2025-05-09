@@ -10,7 +10,7 @@ add_executable(${TEST_NAME} ${SOURCES})
 # Set dependencies
 target_link_libraries(${TEST_NAME}
     PRIVATE
-        CasketOptionParser
+        casket
         GTest::GTest
         GTest::gtest_main)
 

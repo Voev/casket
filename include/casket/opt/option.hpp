@@ -116,17 +116,10 @@ public:
         return description_;
     }
 
-    template <typename Iterator>
-    void consume(Iterator start, Iterator end)
+    void consume(const std::vector<std::string>& args)
     {
         utils::ThrowIfTrue(isUsed_, "{}: option has already been processed", name_);
-
-        std::size_t distance = std::distance(start, end);
-
-        utils::ThrowIfTrue(distance < valueHandler_->minTokens(), "{}: not enough arguments", name_);
-        utils::ThrowIfTrue(distance > valueHandler_->maxTokens(), "{}: too many arguments", name_);
-
-        valueHandler_->parse(value_, std::vector<std::string_view>(start, end));
+        valueHandler_->parse(value_, args);
         isUsed_ = true;
     }
 
@@ -165,9 +158,14 @@ public:
         }
     }
 
-    std::shared_ptr<OptionValueHandler> getValueHandler() const
+    std::size_t maxTokens() const noexcept
     {
-        return valueHandler_;
+        return valueHandler_->maxTokens();
+    }
+
+    std::size_t minTokens() const noexcept
+    {
+        return valueHandler_->minTokens();
     }
 
 private:

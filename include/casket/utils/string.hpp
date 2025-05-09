@@ -22,16 +22,17 @@ inline bool iequals(std::string_view a, std::string_view b)
     return std::equal(a.begin(), a.end(), b.begin(), b.end(), compare);
 }
 
-inline std::vector<std::string> split(const std::string& str, const std::string& delim)
+template <typename String>
+inline std::vector<String> split(const String& str, const std::string& delim)
 {
     size_t start = 0;
-    size_t end = std::string::npos;
+    size_t end = String::npos;
     size_t delimLen = delim.length();
 
     std::string token;
-    std::vector<std::string> res;
+    std::vector<String> res;
 
-    while ((end = str.find(delim, start)) != std::string::npos)
+    while ((end = str.find(delim, start)) != String::npos)
     {
         token = str.substr(start, end - start);
         start = end + delimLen;

@@ -19,7 +19,7 @@ public:
     /// @param value Reference to `std::any` where the result would normally be
     /// stored.
     /// @param args List of string arguments intended for parsing.
-    void parse(std::any&, const std::vector<std::string_view>&) override
+    void parse(std::any&, const std::vector<std::string>&) override
     {
     }
 
@@ -40,7 +40,7 @@ public:
     /// @return Always returns 0.
     std::size_t minTokens() const override
     {
-        return 0U;
+        return 0;
     }
 
     /// @brief Returns 0 as the maximum number of tokens.
@@ -51,7 +51,7 @@ public:
     /// @return Always returns 0.
     std::size_t maxTokens() const override
     {
-        return 0U;
+        return 0;
     }
 };
 
