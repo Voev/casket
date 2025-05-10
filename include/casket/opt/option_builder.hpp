@@ -1,6 +1,7 @@
 #pragma once
 #include <cassert>
 #include <memory>
+#include <type_traits>
 #include <casket/opt/option.hpp>
 
 namespace casket::opt
@@ -34,7 +35,14 @@ public:
     template <typename T>
     OptionBuilder& setDefaultValue(T&& value)
     {
-        option_.defaultValue_ = std::forward<T>(value);
+        if constexpr (std::is_convertible_v<std::decay_t<T>, std::string_view>)
+        {
+            option_.defaultValue_ = std::string(std::forward<T>(value));
+        }
+        else
+        {
+            option_.defaultValue_ = std::forward<T>(value);
+        }
         return *this;
     }
 
