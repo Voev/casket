@@ -28,7 +28,7 @@ public:
         , isRequired_(false)
         , isUsed_(false)
     {
-        utils::ThrowIfTrue(name_.empty(), "Empty option name");
+        ThrowIfTrue(name_.empty(), "Empty option name");
     }
 
     Option(std::string name, std::shared_ptr<OptionValueHandler> valueSemantic)
@@ -37,7 +37,7 @@ public:
         , isRequired_(false)
         , isUsed_(false)
     {
-        utils::ThrowIfTrue(name_.empty(), "Empty option name");
+        ThrowIfTrue(name_.empty(), "Empty option name");
     }
 
     ~Option() noexcept
@@ -118,7 +118,7 @@ public:
 
     void consume(const std::vector<std::string>& args)
     {
-        utils::ThrowIfTrue(isUsed_, "{}: option has already been processed", name_);
+        ThrowIfTrue(isUsed_, "{}: option has already been processed", name_);
         valueHandler_->parse(value_, args);
         isUsed_ = true;
     }
@@ -126,7 +126,7 @@ public:
     template <typename T>
     T get() const
     {
-        utils::ThrowIfFalse(value_.has_value(), "{}: no value provided", name_);
+        ThrowIfFalse(value_.has_value(), "{}: no value provided", name_);
         return std::any_cast<T>(value_);
     }
 
@@ -149,7 +149,7 @@ public:
 
         if (isRequired_)
         {
-            utils::ThrowIfTrue(!isUsed_ && !value_.has_value(), "{}: option is required but not provided", name_);
+            ThrowIfTrue(!isUsed_ && !value_.has_value(), "{}: option is required but not provided", name_);
         }
 
         if (valueHandler_)

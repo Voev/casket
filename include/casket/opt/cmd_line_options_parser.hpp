@@ -10,7 +10,7 @@
 #include <iomanip>
 #include <stdexcept>
 #include <string>
-#include <string_view>
+#include <casket/nonstd/string_view.hpp>
 #include <vector>
 
 #include <casket/opt/option.hpp>
@@ -20,11 +20,11 @@ namespace casket::opt
 {
 
 /// @brief A class for parsing and storing command-line options.
-class CmdLineOptionsParser final : utils::NonCopyable
+class CmdLineOptionsParser final : NonCopyable
 {
 private:
-    static constexpr std::string_view kSinglePrefix = "-";
-    static constexpr std::string_view kDoublePrefix = "--";
+    static constexpr nonstd::string_view kSinglePrefix = "-";
+    static constexpr nonstd::string_view kDoublePrefix = "--";
 
     using OptionList = std::list<Option>;
     using OptionIterator = OptionList::iterator;
@@ -43,7 +43,7 @@ private:
     /// @param str The string to check.
     /// @param prefix The prefix to look for.
     /// @return True if `str` starts with `prefix`, otherwise false.
-    static inline bool startsWith(std::string_view str, std::string_view prefix)
+    static inline bool startsWith(nonstd::string_view str, nonstd::string_view prefix)
     {
         return str.rfind(prefix, 0) == 0;
     }
@@ -69,7 +69,7 @@ public:
     /// @param argv The command-line arguments as a C-style array of strings.
     void parse(int argc, char* argv[])
     {
-        std::vector<std::string_view> args{(argc > 1 ? argv + 1 : argv), argv + argc};
+        std::vector<nonstd::string_view> args{(argc > 1 ? argv + 1 : argv), argv + argc};
         auto allocatedArgs = preprocess(args);
         postprocess(allocatedArgs);
     }
@@ -77,7 +77,7 @@ public:
     /// @brief Parses the command-line arguments.
     /// @param argc The argument count.
     /// @param argv The argument values.
-    void parse(const std::vector<std::string_view>& args)
+    void parse(const std::vector<nonstd::string_view>& args)
     {
         auto allocatedArgs = preprocess(args);
         postprocess(allocatedArgs);
@@ -132,7 +132,7 @@ public:
     /// @brief Outputs help information for the parser.
     /// @param os The output stream to write the help information to.
     /// @param usageName An optional program usage string.
-    void help(std::ostream& os, std::string_view usageName = "") const
+    void help(std::ostream& os, nonstd::string_view usageName = "") const
     {
         usage(os, usageName);
 
@@ -172,17 +172,17 @@ private:
         auto it = optionMap_.find(name);
         if (it == optionMap_.end())
         {
-            throw utils::RuntimeError("No such option '{}'", name);
+            throw RuntimeError("No such option '{}'", name);
         }
         return *(it->second);
     }
 
     /// @brief Preprocesses command-line arguments for parsing.
     /// @tparam T The type of the elements in the input arguments (default:
-    /// std::string_view).
+    /// nonstd::string_view).
     /// @param args The list of arguments to preprocess.
     /// @return A vector of preprocessed argument strings.
-    template <typename T = std::string_view>
+    template <typename T = nonstd::string_view>
     std::vector<std::string> preprocess(const std::vector<T>& args)
     {
         std::vector<std::string> result;
@@ -230,13 +230,13 @@ private:
 
                 if (values.size() < option->minTokens())
                 {
-                    throw utils::RuntimeError("Option '{}' requires at least {} values", optionName,
+                    throw RuntimeError("Option '{}' requires at least {} values", optionName,
                                               option->minTokens());
                 }
 
                 if (option->maxTokens() > 0 && values.size() > option->maxTokens())
                 {
-                    throw utils::RuntimeError("Option '{}' accepts at most {} values", optionName, option->maxTokens());
+                    throw RuntimeError("Option '{}' accepts at most {} values", optionName, option->maxTokens());
                 }
 
                 option->consume(values);
@@ -244,7 +244,7 @@ private:
             }
             else
             {
-                throw utils::RuntimeError("Unknown option '{}'", optionName);
+                throw RuntimeError("Unknown option '{}'", optionName);
             }
         }
         parsed_ = true;
@@ -253,7 +253,7 @@ private:
     /// @brief Outputs program usage information to a stream.
     /// @param os The output stream to write the usage information to.
     /// @param usageName An optional program usage string.
-    void usage(std::ostream& os, std::string_view usageName) const
+    void usage(std::ostream& os, nonstd::string_view usageName) const
     {
         os << "Usage:\n  " << usageName;
 

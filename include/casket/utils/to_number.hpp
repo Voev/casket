@@ -1,16 +1,16 @@
 #pragma once
 #include <charconv>
 #include <system_error>
-#include <string_view>
+#include <casket/nonstd/string_view.hpp>
 #include <type_traits>
 
 #include <casket/utils/exception.hpp>
 
-namespace casket::utils
+namespace casket
 {
 
 template <typename T>
-inline void to_number(std::string_view value, T& result, std::error_code& ec)
+inline void to_number(nonstd::string_view value, T& result, std::error_code& ec)
 {
     static_assert(std::is_integral_v<T> == true);
     auto r = std::from_chars(value.data(), value.data() + value.size(), result);
@@ -21,11 +21,11 @@ inline void to_number(std::string_view value, T& result, std::error_code& ec)
 }
 
 template <typename T>
-inline void to_number(std::string_view value, T& result)
+inline void to_number(nonstd::string_view value, T& result)
 {
     std::error_code ec;
     to_number<T>(value, result, ec);
-    utils::ThrowIfError(ec);
+    ThrowIfError(ec);
 }
 
-} // namespace casket::utils
+} // namespace casket

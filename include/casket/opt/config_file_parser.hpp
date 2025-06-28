@@ -11,14 +11,14 @@
 namespace casket::opt
 {
 
-class ConfigFileParser final : public utils::NonCopyable
+class ConfigFileParser final : public NonCopyable
 {
 public:
     explicit ConfigFileParser(const std::string& filename)
         : path_(filename)
     {
-        utils::ThrowIfFalse(std::filesystem::exists(path_), "File not found: {}", filename);
-        utils::ThrowIfFalse(std::filesystem::is_regular_file(path_), "Not a file: {}", filename);
+        ThrowIfFalse(std::filesystem::exists(path_), "File not found: {}", filename);
+        ThrowIfFalse(std::filesystem::is_regular_file(path_), "Not a file: {}", filename);
     }
 
     ~ConfigFileParser() noexcept
@@ -35,7 +35,7 @@ public:
         }
         catch (const std::exception& e)
         {
-            throw std::runtime_error(utils::format("[Config error: {}] {}", path_.filename().string(), e.what()));
+            throw std::runtime_error(format("[Config error: {}] {}", path_.filename().string(), e.what()));
         }
     }
 

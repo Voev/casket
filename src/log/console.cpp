@@ -18,60 +18,60 @@ std::string currentTimeAndDate()
     return ss.str();
 }
 
-void cerr(std::string_view color, std::string_view label, std::string_view msg)
+void cerr(nonstd::string_view color, nonstd::string_view label, nonstd::string_view msg)
 {
     std::cerr << currentTimeAndDate() << "[" << color << label
-              << casket::log::resetColor << "] " << msg << std::endl;
+              << casket::resetColor << "] " << msg << std::endl;
 }
 
-void cout(std::string_view color, std::string_view label, std::string_view msg)
+void cout(nonstd::string_view color, nonstd::string_view label, nonstd::string_view msg)
 {
     std::cout << currentTimeAndDate() << "[" << color << label
-              << casket::log::resetColor << "] " << msg << std::endl;
+              << casket::resetColor << "] " << msg << std::endl;
 }
 
 } // namespace
 
-namespace casket::log
+namespace casket
 {
-void Console::emergency(std::string_view msg)
+void Console::emergency(nonstd::string_view msg)
 {
     cerr(bRed, "EMERG", msg);
 }
 
-void Console::alert(std::string_view msg)
+void Console::alert(nonstd::string_view msg)
 {
     cerr(bRed, "ALERT", msg);
 }
 
-void Console::critical(std::string_view msg)
+void Console::critical(nonstd::string_view msg)
 {
     cerr(bRed, "CRITL", msg);
 }
 
-void Console::error(std::string_view msg)
+void Console::error(nonstd::string_view msg)
 {
     cerr(bRed, "ERROR", msg);
 }
 
-void Console::warning(std::string_view msg)
+void Console::warning(nonstd::string_view msg)
 {
     cout(bYellow, "WARNG", msg);
 }
 
-void Console::notice(std::string_view msg)
+void Console::notice(nonstd::string_view msg)
 {
     cout(bWhite, "NOTIC", msg);
 }
 
-void Console::info(std::string_view msg)
+void Console::info(nonstd::string_view msg)
 {
     cout(bWhite, "INFOR", msg);
 }
 
-void Console::debug(std::string_view msg)
+void Console::debug(nonstd::string_view msg)
 {
     cout(bCyan, "DEBUG", msg);
 }
 
-} // namespace casket::log
+} // namespace casket

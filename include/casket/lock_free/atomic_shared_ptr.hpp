@@ -51,6 +51,7 @@ public:
         if (controlBlock != nullptr)
         {
             int before = controlBlock->refCount.fetch_add(1);
+            (void)before;
             assert(before);
         }
     };
@@ -268,6 +269,7 @@ SharedPtr<T> AtomicSharedPtr<T>::get()
 
     auto block = reinterpret_cast<ControlBlock<T>*>(packedPtrCopy >> MAGIC_LEN);
     int before = block->refCount.fetch_add(1);
+    (void)before;
     assert(before);
     // copy is completed
 
@@ -287,6 +289,7 @@ SharedPtr<T> AtomicSharedPtr<T>::get()
             ((expected & MAGIC_MASK) == 0)) // >20 hours wasted here
         {
             int before = block->refCount.fetch_sub(1);
+            (void)before;
             assert(before);
             break;
         }

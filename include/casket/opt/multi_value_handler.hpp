@@ -20,7 +20,7 @@ public:
 
     void parse(std::any& value, const std::vector<std::string>& args) override
     {
-        utils::ThrowIfTrue(args.size() < minTokens(), "not enough arguments");
+        ThrowIfTrue(args.size() < minTokens(), "not enough arguments");
 
         std::vector<T> values;
         values.reserve(args.size());
@@ -31,17 +31,17 @@ public:
 
             if constexpr (std::is_same_v<T, bool>)
             {
-                if (utils::iequals(arg, "true") || utils::iequals(arg, "yes"))
+                if (iequals(arg, "true") || iequals(arg, "yes"))
                 {
                     typedValue = true;
                 }
-                else if (utils::iequals(arg, "false") || utils::iequals(arg, "no"))
+                else if (iequals(arg, "false") || iequals(arg, "no"))
                 {
                     typedValue = false;
                 }
                 else
                 {
-                    throw utils::RuntimeError("could not parse bool value '{}'", arg);
+                    throw RuntimeError("could not parse bool value '{}'", arg);
                 }
             }
             else
@@ -49,7 +49,7 @@ public:
                 std::istringstream iss{arg};
                 if (!(iss >> typedValue))
                 {
-                    throw utils::RuntimeError("could not parse value '{}'", arg);
+                    throw RuntimeError("could not parse value '{}'", arg);
                 }
             }
 
