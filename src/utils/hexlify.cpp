@@ -1,7 +1,7 @@
 #include <casket/utils/hexlify.hpp>
 #include <casket/utils/exception.hpp>
 
-namespace casket::utils {
+namespace casket {
 
 inline uint8_t char2digit(const char ch) {
     switch (ch) {
@@ -64,7 +64,7 @@ std::string hexlify(const std::uint8_t* bytes, std::size_t size) {
     return out;
 }
 
-std::vector<uint8_t> unhexlify(std::string_view in) {
+std::vector<uint8_t> unhexlify(nonstd::string_view in) {
 
     ThrowIfFalse(in.size() % 2 == 0, "even string length required");
 
@@ -78,4 +78,4 @@ std::vector<uint8_t> unhexlify(std::string_view in) {
     return out;
 }
 
-} // namespace casket::utils
+} // namespace casket

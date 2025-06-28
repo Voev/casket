@@ -38,25 +38,25 @@ public:
     /// @throws std::runtime_error If the string cannot be parsed into type `T`.
     void parse(std::any& value, const std::vector<std::string>& args) override
     {
-        utils::ThrowIfTrue(args.size() < minTokens(), "not enough arguments");
-        utils::ThrowIfTrue(args.size() > maxTokens(), "too many arguments");
+        ThrowIfTrue(args.size() < minTokens(), "not enough arguments");
+        ThrowIfTrue(args.size() > maxTokens(), "too many arguments");
 
         auto str = args.front();
         T typedValue{};
 
         if constexpr (std::is_same_v<T, bool>)
         {
-            if (utils::iequals(str, "true") || utils::iequals(str, "yes"))
+            if (iequals(str, "true") || iequals(str, "yes"))
             {
                 typedValue = true;
             }
-            else if (utils::iequals(str, "false") || utils::iequals(str, "no"))
+            else if (iequals(str, "false") || iequals(str, "no"))
             {
                 typedValue = false;
             }
             else
             {
-                throw utils::RuntimeError("could not parse bool value '{}'", str);
+                throw RuntimeError("could not parse bool value '{}'", str);
             }
             value = std::move(typedValue);
         }
@@ -69,7 +69,7 @@ public:
             }
             else
             {
-                throw utils::RuntimeError("could not parse value '{}'", str);
+                throw RuntimeError("could not parse value '{}'", str);
             }
         }
     }

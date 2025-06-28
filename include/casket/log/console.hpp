@@ -1,7 +1,7 @@
 #pragma once
 #include <casket/log/logger.hpp>
 
-namespace casket::log
+namespace casket
 {
 
 class Console final : public Logger
@@ -11,21 +11,21 @@ public:
 
     ~Console() = default;
 
-    void emergency(std::string_view msg) override;
+    void emergency(nonstd::string_view msg) override;
 
-    void alert(std::string_view msg) override;
+    void alert(nonstd::string_view msg) override;
 
-    void critical(std::string_view msg) override;
+    void critical(nonstd::string_view msg) override;
 
-    void error(std::string_view msg) override;
+    void error(nonstd::string_view msg) override;
 
-    void warning(std::string_view msg) override;
+    void warning(nonstd::string_view msg) override;
 
-    void notice(std::string_view msg) override;
+    void notice(nonstd::string_view msg) override;
 
-    void info(std::string_view msg) override;
+    void info(nonstd::string_view msg) override;
 
-    void debug(std::string_view msg) override;
+    void debug(nonstd::string_view msg) override;
 };
 
-} // namespace casket::log
+} // namespace casket

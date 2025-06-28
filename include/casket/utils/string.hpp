@@ -3,17 +3,17 @@
 #include <cctype>
 #include <vector>
 #include <string>
-#include <string_view>
+#include <casket/nonstd/string_view.hpp>
 
-namespace casket::utils
+namespace casket
 {
 
-inline bool equals(std::string_view a, std::string_view b)
+inline bool equals(nonstd::string_view a, nonstd::string_view b)
 {
     return std::equal(a.begin(), a.end(), b.begin(), b.end());
 }
 
-inline bool iequals(std::string_view a, std::string_view b)
+inline bool iequals(nonstd::string_view a, nonstd::string_view b)
 {
     auto compare = [](char x, char y) -> bool {
         return std::tolower(static_cast<unsigned char>(x)) ==
@@ -67,4 +67,4 @@ inline void trim(String& s)
     ltrim<String>(s);
 }
 
-} // namespace casket::utils
+} // namespace casket

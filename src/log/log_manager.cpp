@@ -1,6 +1,6 @@
 #include <casket/log/log_manager.hpp>
 
-namespace casket::log
+namespace casket
 {
 
 LogManager::LogManager()
@@ -42,4 +42,4 @@ void LogManager::disable(Type type)
     loggers_.erase(type);
 }
 
-} // namespace casket::log
+} // namespace casket

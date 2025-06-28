@@ -21,7 +21,7 @@
 #define casket_IS_BIG_ENDIAN (__BYTE_ORDER == __BIG_ENDIAN)
 #endif
 
-namespace casket::utils
+namespace casket
 {
 
 inline uint8_t do_change_endian(uint8_t data)
@@ -128,4 +128,4 @@ template <typename T> inline T le_to_host(T data)
 }
 #endif
 
-} // namespace casket::utils
+} // namespace casket

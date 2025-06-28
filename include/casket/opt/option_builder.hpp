@@ -35,7 +35,7 @@ public:
     template <typename T>
     OptionBuilder& setDefaultValue(T&& value)
     {
-        if constexpr (std::is_convertible_v<std::decay_t<T>, std::string_view>)
+        if constexpr (std::is_convertible_v<std::decay_t<T>, nonstd::string_view>)
         {
             option_.defaultValue_ = std::string(std::forward<T>(value));
         }

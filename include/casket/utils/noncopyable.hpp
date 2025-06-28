@@ -1,6 +1,6 @@
 #pragma once
 
-namespace casket::utils
+namespace casket
 {
 
 class NonCopyable
@@ -13,4 +13,4 @@ public:
     NonCopyable& operator=(const NonCopyable& other) = delete;
 };
 
-} // namespace casket::utils
+} // namespace casket

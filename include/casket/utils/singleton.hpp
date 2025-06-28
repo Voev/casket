@@ -1,6 +1,6 @@
 #pragma once
 
-namespace casket::utils
+namespace casket
 {
 
 template <typename T> class Singleton
@@ -22,4 +22,4 @@ public:
     Singleton& operator=(Singleton&& other) = delete;
 };
 
-} // namespace casket::utils
+} // namespace casket

@@ -10,7 +10,7 @@
 namespace casket::opt
 {
 
-class ConfigOptionsReader final : public utils::NonCopyable
+class ConfigOptionsReader final : public NonCopyable
 {
 public:
     ConfigOptionsReader()
@@ -35,7 +35,7 @@ public:
                 if (sectionStack.empty())
                 {
                     line.pop_back();
-                    utils::rtrim(line);
+                    rtrim(line);
                 }
                 else
                 {
@@ -43,9 +43,9 @@ public:
                 }
                 sectionStack.push_back(line);
             }
-            else if (utils::equals(line, "}"))
+            else if (equals(line, "}"))
             {
-                utils::ThrowIfTrue(sectionStack.empty(), "[Line {}] Mismatched closing brace", lineno);
+                ThrowIfTrue(sectionStack.empty(), "[Line {}] Mismatched closing brace", lineno);
                 std::string completedSection = sectionStack.back();
                 sectionStack.pop_back();
 
@@ -65,7 +65,7 @@ public:
             }
         }
 
-        utils::ThrowIfFalse(sectionStack.empty(), "[Section '{}'] Missing closing brace", sectionStack.back());
+        ThrowIfFalse(sectionStack.empty(), "[Section '{}'] Missing closing brace", sectionStack.back());
     }
 
 private:
@@ -75,7 +75,7 @@ private:
         {
             lineno++;
 
-            utils::ltrim(line);
+            ltrim(line);
 
             auto commentPos = line.find_first_of('#');
             if (commentPos != std::string::npos)
@@ -83,7 +83,7 @@ private:
                 line.erase(commentPos);
             }
 
-            utils::rtrim(line);
+            rtrim(line);
 
             if (line.empty())
             {
@@ -99,7 +99,7 @@ private:
     void handle(const ConfigOptions& config, const std::string& name, const std::vector<std::string>& lines)
     {
         Section* section = config.find(name);
-        utils::ThrowIfTrue(section == nullptr, "Unknown section: {}", name);
+        ThrowIfTrue(section == nullptr, "Unknown section: {}", name);
         try
         {
             section->parse(lines);
@@ -107,7 +107,7 @@ private:
         }
         catch (std::exception& e)
         {
-            throw utils::RuntimeError("[Section '{}'] {}", name, e.what());
+            throw RuntimeError("[Section '{}'] {}", name, e.what());
         }
     }
 };

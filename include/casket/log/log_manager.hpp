@@ -9,7 +9,7 @@
 #include <casket/utils/singleton.hpp>
 #include <casket/utils/format.hpp>
 
-namespace casket::log
+namespace casket
 {
 
 enum class Level
@@ -29,7 +29,7 @@ enum class Type
     Console
 };
 
-class LogManager final : public utils::Singleton<LogManager>
+class LogManager final : public Singleton<LogManager>
 {
 public:
     LogManager();
@@ -47,120 +47,120 @@ public:
     void disable(Type type);
 
     template <typename... Args>
-    friend void emergency(std::string_view str, Args&&... args);
+    friend void emergency(nonstd::string_view str, Args&&... args);
 
     template <typename... Args>
-    friend void alert(std::string_view str, Args&&... args);
+    friend void alert(nonstd::string_view str, Args&&... args);
 
     template <typename... Args>
-    friend void critical(std::string_view str, Args&&... args);
+    friend void critical(nonstd::string_view str, Args&&... args);
 
     template <typename... Args>
-    friend void error(std::string_view str, Args&&... args);
+    friend void error(nonstd::string_view str, Args&&... args);
 
     template <typename... Args>
-    friend void warning(std::string_view str, Args&&... args);
+    friend void warning(nonstd::string_view str, Args&&... args);
 
     template <typename... Args>
-    friend void notice(std::string_view str, Args&&... args);
+    friend void notice(nonstd::string_view str, Args&&... args);
 
     template <typename... Args>
-    friend void info(std::string_view str, Args&&... args);
+    friend void info(nonstd::string_view str, Args&&... args);
 
     template <typename... Args>
-    friend void debug(std::string_view str, Args&&... args);
+    friend void debug(nonstd::string_view str, Args&&... args);
 
 private:
     Level maxLevel_;
     std::map<Type, std::shared_ptr<Logger>> loggers_;
 };
 
-template <typename... Args> void emergency(std::string_view str, Args&&... args)
+template <typename... Args> void emergency(nonstd::string_view str, Args&&... args)
 {
     auto& inst = LogManager::Instance();
     if (Level::Emergency <= inst.getLevel())
     {
-        auto msg = utils::format(str, std::forward<Args>(args)...);
+        auto msg = format(str, std::forward<Args>(args)...);
         std::for_each(inst.loggers_.begin(), inst.loggers_.end(),
                       [&](const auto& l) { l.second->emergency(msg); });
     }
 }
 
-template <typename... Args> void alert(std::string_view str, Args&&... args)
+template <typename... Args> void alert(nonstd::string_view str, Args&&... args)
 {
     auto& inst = LogManager::Instance();
     if (Level::Alert <= inst.getLevel())
     {
-        auto msg = utils::format(str, std::forward<Args>(args)...);
+        auto msg = format(str, std::forward<Args>(args)...);
         std::for_each(inst.loggers_.begin(), inst.loggers_.end(),
                       [&](const auto& l) { l.second->alert(msg); });
     }
 }
 
-template <typename... Args> void critical(std::string_view str, Args&&... args)
+template <typename... Args> void critical(nonstd::string_view str, Args&&... args)
 {
     auto& inst = LogManager::Instance();
     if (Level::Critical <= inst.getLevel())
     {
-        auto msg = utils::format(str, std::forward<Args>(args)...);
+        auto msg = format(str, std::forward<Args>(args)...);
         std::for_each(inst.loggers_.begin(), inst.loggers_.end(),
                       [&](const auto& l) { l.second->critical(msg); });
     }
 }
 
-template <typename... Args> void error(std::string_view str, Args&&... args)
+template <typename... Args> void error(nonstd::string_view str, Args&&... args)
 {
     auto& inst = LogManager::Instance();
     if (Level::Error <= inst.getLevel())
     {
-        auto msg = utils::format(str, std::forward<Args>(args)...);
+        auto msg = format(str, std::forward<Args>(args)...);
         std::for_each(inst.loggers_.begin(), inst.loggers_.end(),
                       [&](const auto& l) { l.second->error(msg); });
     }
 }
 
-template <typename... Args> void warning(std::string_view str, Args&&... args)
+template <typename... Args> void warning(nonstd::string_view str, Args&&... args)
 {
     auto& inst = LogManager::Instance();
     if (Level::Warning <= inst.getLevel())
     {
-        auto msg = utils::format(str, std::forward<Args>(args)...);
+        auto msg = format(str, std::forward<Args>(args)...);
         std::for_each(inst.loggers_.begin(), inst.loggers_.end(),
                       [&](const auto& l) { l.second->warning(msg); });
     }
 }
 
-template <typename... Args> void notice(std::string_view str, Args&&... args)
+template <typename... Args> void notice(nonstd::string_view str, Args&&... args)
 {
     auto& inst = LogManager::Instance();
     if (Level::Notice <= inst.getLevel())
     {
-        auto msg = utils::format(str, std::forward<Args>(args)...);
+        auto msg = format(str, std::forward<Args>(args)...);
         std::for_each(inst.loggers_.begin(), inst.loggers_.end(),
                       [&](const auto& l) { l.second->notice(msg); });
     }
 }
 
-template <typename... Args> void info(std::string_view str, Args&&... args)
+template <typename... Args> void info(nonstd::string_view str, Args&&... args)
 {
     auto& inst = LogManager::Instance();
     if (Level::Info <= inst.getLevel())
     {
-        auto msg = utils::format(str, std::forward<Args>(args)...);
+        auto msg = format(str, std::forward<Args>(args)...);
         std::for_each(inst.loggers_.begin(), inst.loggers_.end(),
                       [&](const auto& l) { l.second->info(msg); });
     }
 }
 
-template <typename... Args> void debug(std::string_view str, Args&&... args)
+template <typename... Args> void debug(nonstd::string_view str, Args&&... args)
 {
     auto& inst = LogManager::Instance();
     if (Level::Debug <= inst.getLevel())
     {
-        auto msg = utils::format(str, std::forward<Args>(args)...);
+        auto msg = format(str, std::forward<Args>(args)...);
         std::for_each(inst.loggers_.begin(), inst.loggers_.end(),
                       [&](const auto& l) { l.second->debug(msg); });
     }
 }
 
-} // namespace casket::log
+} // namespace casket

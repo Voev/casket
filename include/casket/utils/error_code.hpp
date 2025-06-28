@@ -1,7 +1,7 @@
 #pragma once
 #include <system_error>
 
-namespace casket::utils
+namespace casket
 {
 
 inline std::error_code GetLastSystemError()
@@ -14,4 +14,4 @@ inline void ClearError(std::error_code& ec)
     ec.assign(0, ec.category());
 }
 
-} // namespace casket::utils
+} // namespace casket
