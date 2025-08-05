@@ -1,212 +1,296 @@
 #pragma once
-#include <cstddef>
-#include <cassert>
-#include <memory>
-#include <casket/utils/noncopyable.hpp>
+
+#include <iterator>
+#include <type_traits>
 
 namespace casket
 {
 
-/// Simplified double-linked intrusive list of std::shared_ptr.
-/**
- * Const time insertion of std::shared_ptr.
- * Const time deletion of std::shared_ptr (deletion by value).
- *
- * Requirements:
- * if value is rvalue of type Value then expression
- * static_cast&lt;IntrusiveList&lt;Value&gt;::base_hook&amp;&gt;(value)
- * must be well formed and accessible from IntrusiveList&lt;Value&gt;.
- */
-template <typename Value>
-class IntrusiveList : private utils::NonCopyable
+template <typename T>
+class IntrusiveListNode
 {
 public:
-    typedef Value value_type;
-    typedef Value* pointer;
-    typedef Value& reference;
-    typedef std::weak_ptr<Value> weak_pointer;
-    typedef std::shared_ptr<Value> shared_pointer;
+    IntrusiveListNode() = default;
 
-    /// Required hook for items of the list.
-    class base_hook;
+    IntrusiveListNode(const IntrusiveListNode&) = delete;
+    IntrusiveListNode& operator=(const IntrusiveListNode&) = delete;
 
-    /// Never throws
-    IntrusiveList();
-    ~IntrusiveList();
+    T* next = nullptr;
+    T* prev = nullptr;
 
-    /// Never throws
-    const shared_pointer& front() const;
+protected:
+    ~IntrusiveListNode() = default;
+};
 
-    /// Never throws
-    static shared_pointer prev(const shared_pointer& value);
-
-    /// Never throws
-    static const shared_pointer& next(const shared_pointer& value);
-
-    /// Never throws
-    void push_front(const shared_pointer& value);
-
-    /// Never throws
-    void erase(const shared_pointer& value);
-
-    /// Never throws
-    void clear();
-
-    std::size_t size() const;
-
-    bool empty() const;
-
-private:
-    static base_hook& get_hook(reference value);
-
-    std::size_t size_;
-    shared_pointer front_;
-}; // class IntrusiveList
-
-template <typename Value>
-class IntrusiveList<Value>::base_hook
+template <typename T>
+class IntrusiveList final
 {
-private:
-    typedef base_hook this_type;
+    static_assert(std::is_same_v<decltype(T::next), T*>, "T must have 'next' member of type T*");
+    static_assert(std::is_same_v<decltype(T::prev), T*>, "T must have 'prev' member of type T*");
 
 public:
-    base_hook();
-    base_hook(const this_type&);
-    base_hook& operator=(const this_type&);
+    class Iterator
+    {
+    public:
+        using iterator_category = std::bidirectional_iterator_tag;
+        using value_type = T;
+        using difference_type = std::ptrdiff_t;
+        using pointer = T*;
+        using reference = T&;
+
+        explicit Iterator(T* ptr = nullptr)
+            : current_(ptr)
+        {
+        }
+
+        reference operator*() const
+        {
+            return *current_;
+        }
+        pointer operator->() const
+        {
+            return current_;
+        }
+
+        Iterator& operator++()
+        {
+            current_ = current_->next;
+            return *this;
+        }
+
+        Iterator operator++(int)
+        {
+            Iterator tmp = *this;
+            ++(*this);
+            return tmp;
+        }
+
+        Iterator& operator--()
+        {
+            current_ = current_->prev;
+            return *this;
+        }
+
+        Iterator operator--(int)
+        {
+            Iterator tmp = *this;
+            --(*this);
+            return tmp;
+        }
+
+        bool operator==(const Iterator& other) const
+        {
+            return current_ == other.current_;
+        }
+
+        bool operator!=(const Iterator& other) const
+        {
+            return !(*this == other);
+        }
+
+    private:
+        T* current_;
+    };
+
+    class ConstIterator
+    {
+    public:
+        using iterator_category = std::bidirectional_iterator_tag;
+        using value_type = const T;
+        using difference_type = std::ptrdiff_t;
+        using pointer = const T*;
+        using reference = const T&;
+
+        explicit ConstIterator(const T* ptr = nullptr)
+            : current_(ptr)
+        {
+        }
+
+        reference operator*() const
+        {
+            return *current_;
+        }
+        pointer operator->() const
+        {
+            return current_;
+        }
+
+        ConstIterator& operator++()
+        {
+            current_ = current_->next;
+            return *this;
+        }
+
+        ConstIterator operator++(int)
+        {
+            ConstIterator tmp = *this;
+            ++(*this);
+            return tmp;
+        }
+
+        ConstIterator& operator--()
+        {
+            current_ = current_->prev;
+            return *this;
+        }
+
+        ConstIterator operator--(int)
+        {
+            ConstIterator tmp = *this;
+            --(*this);
+            return tmp;
+        }
+
+        bool operator==(const ConstIterator& other) const
+        {
+            return current_ == other.current_;
+        }
+
+        bool operator!=(const ConstIterator& other) const
+        {
+            return !(*this == other);
+        }
+
+    private:
+        const T* current_;
+    };
+
+    IntrusiveList() = default;
+
+    ~IntrusiveList()
+    {
+        clear();
+    }
+
+    void push_front(T& item)
+    {
+        item.next = head_;
+        item.prev = nullptr;
+
+        if (head_)
+        {
+            head_->prev = &item;
+        }
+        else
+        {
+            tail_ = &item;
+        }
+
+        head_ = &item;
+        ++size_;
+    }
+
+    void push_back(T& item)
+    {
+        item.prev = tail_;
+        item.next = nullptr;
+
+        if (tail_)
+        {
+            tail_->next = &item;
+        }
+        else
+        {
+            head_ = &item;
+        }
+
+        tail_ = &item;
+        ++size_;
+    }
+
+    void remove(T& item)
+    {
+        if (item.prev)
+        {
+            item.prev->next = item.next;
+        }
+        else
+        {
+            head_ = item.next;
+        }
+
+        if (item.next)
+        {
+            item.next->prev = item.prev;
+        }
+        else
+        {
+            tail_ = item.prev;
+        }
+
+        item.next = nullptr;
+        item.prev = nullptr;
+        --size_;
+    }
+
+    void clear()
+    {
+        while (head_)
+        {
+            auto* next = head_->next;
+            head_->next = nullptr;
+            head_->prev = nullptr;
+            head_ = next;
+        }
+        tail_ = nullptr;
+        size_ = 0;
+    }
+
+    T& front()
+    {
+        return *head_;
+    }
+    const T& front() const
+    {
+        return *head_;
+    }
+    T& back()
+    {
+        return *tail_;
+    }
+    const T& back() const
+    {
+        return *tail_;
+    }
+
+    Iterator begin()
+    {
+        return Iterator(head_);
+    }
+    Iterator end()
+    {
+        return Iterator(nullptr);
+    }
+    ConstIterator begin() const
+    {
+        return ConstIterator(head_);
+    }
+    ConstIterator end() const
+    {
+        return ConstIterator(nullptr);
+    }
+    ConstIterator cbegin() const
+    {
+        return ConstIterator(head_);
+    }
+    ConstIterator cend() const
+    {
+        return ConstIterator(nullptr);
+    }
+
+    size_t size() const
+    {
+        return size_;
+    }
+    bool empty() const
+    {
+        return size_ == 0;
+    }
 
 private:
-    friend class IntrusiveList<Value>;
-    weak_pointer prev_;
-    shared_pointer next_;
-}; // class IntrusiveList::base_hook
-
-template <typename Value>
-IntrusiveList<Value>::base_hook::base_hook()
-{
-}
-
-template <typename Value>
-IntrusiveList<Value>::base_hook::base_hook(const this_type&)
-{
-}
-
-template <typename Value>
-typename IntrusiveList<Value>::base_hook& IntrusiveList<Value>::base_hook::operator=(const this_type&)
-{
-    return *this;
-}
-
-template <typename Value>
-IntrusiveList<Value>::IntrusiveList()
-    : size_(0)
-{
-}
-
-template <typename Value>
-IntrusiveList<Value>::~IntrusiveList()
-{
-    clear();
-}
-
-template <typename Value>
-const typename IntrusiveList<Value>::shared_pointer& IntrusiveList<Value>::front() const
-{
-    return front_;
-}
-
-template <typename Value>
-typename IntrusiveList<Value>::shared_pointer IntrusiveList<Value>::prev(const shared_pointer& value)
-{
-    return get_hook(*value).prev_.lock();
-}
-
-template <typename Value>
-const typename IntrusiveList<Value>::shared_pointer& IntrusiveList<Value>::next(const shared_pointer& value)
-{
-    return get_hook(*value).next_;
-}
-
-template <typename Value>
-void IntrusiveList<Value>::push_front(const shared_pointer& value)
-{
-    BOOST_ASSERT_MSG(value, "The value can no not be null ptr");
-
-    base_hook& value_hook = get_hook(*value);
-
-    BOOST_ASSERT_MSG(!value_hook.prev_.lock() && !value_hook.next_, "The value to push has to be not linked");
-
-    value_hook.next_ = front_;
-    if (front_)
-    {
-        base_hook& front_hook = get_hook(*front_);
-        front_hook.prev_ = value;
-    }
-    front_ = value;
-    ++size_;
-}
-
-template <typename Value>
-void IntrusiveList<Value>::erase(const shared_pointer& value)
-{
-    BOOST_ASSERT_MSG(value, "The value can no not be null ptr");
-
-    base_hook& value_hook = get_hook(*value);
-    if (value == front_)
-    {
-        front_ = value_hook.next_;
-    }
-    const shared_pointer prev = value_hook.prev_.lock();
-    if (prev)
-    {
-        base_hook& prev_hook = get_hook(*prev);
-        prev_hook.next_ = value_hook.next_;
-    }
-    if (value_hook.next_)
-    {
-        base_hook& next_hook = get_hook(*value_hook.next_);
-        next_hook.prev_ = value_hook.prev_;
-    }
-    value_hook.prev_.reset();
-    value_hook.next_.reset();
-    --size_;
-
-    BOOST_ASSERT_MSG(!value_hook.prev_.lock() && !value_hook.next_, "The erased value has to be unlinked");
-}
-
-template <typename Value>
-void IntrusiveList<Value>::clear()
-{
-    // We don't want to have recusrive calls of wrapped_session's destructor
-    // because the deep of such recursion may be equal to the size of list.
-    // The last can be too great for the stack.
-    while (front_)
-    {
-        base_hook& front_hook = get_hook(*front_);
-        shared_pointer tmp;
-        tmp.swap(front_hook.next_);
-        front_hook.prev_.reset();
-        front_.swap(tmp);
-    }
-    size_ = 0;
-}
-
-template <typename Value>
-std::size_t IntrusiveList<Value>::size() const
-{
-    return size_;
-}
-
-template <typename Value>
-bool IntrusiveList<Value>::empty() const
-{
-    return 0 == size_;
-}
-
-template <typename Value>
-typename IntrusiveList<Value>::base_hook& IntrusiveList<Value>::get_hook(reference value)
-{
-    return static_cast<base_hook&>(value);
-}
+    T* head_ = nullptr;
+    T* tail_ = nullptr;
+    size_t size_ = 0;
+};
 
 } // namespace casket
-
