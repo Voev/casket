@@ -200,27 +200,30 @@ public:
 
     void remove(T& item)
     {
-        if (item.prev)
+        if (item.prev != nullptr || item.next != nullptr || head_ == &item)
         {
-            item.prev->next = item.next;
-        }
-        else
-        {
-            head_ = item.next;
-        }
+            if (item.prev)
+            {
+                item.prev->next = item.next;
+            }
+            else
+            {
+                head_ = item.next;
+            }
 
-        if (item.next)
-        {
-            item.next->prev = item.prev;
-        }
-        else
-        {
-            tail_ = item.prev;
-        }
+            if (item.next)
+            {
+                item.next->prev = item.prev;
+            }
+            else
+            {
+                tail_ = item.prev;
+            }
 
-        item.next = nullptr;
-        item.prev = nullptr;
-        --size_;
+            item.next = nullptr;
+            item.prev = nullptr;
+            --size_;
+        }
     }
 
     void clear()

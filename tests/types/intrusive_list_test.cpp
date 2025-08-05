@@ -25,6 +25,7 @@ protected:
 
     void TearDown() override
     {
+        list.clear();
         delete node1;
         delete node2;
         delete node3;
