@@ -21,6 +21,9 @@ public:
         readerCounters_[1].store(0, std::memory_order_relaxed);
     }
 
+    ~RCU() noexcept
+    {}
+
     Epoch read_lock() noexcept
     {
         Epoch epoch;
@@ -31,20 +34,21 @@ public:
             epoch = globalEpoch_.load(std::memory_order_acquire);
             counterIndex = static_cast<int>(epoch & 1);
 
-            readerCounters_[counterIndex].fetch_add(1, std::memory_order_acq_rel);
+            readerCounters_[counterIndex].fetch_add(1, std::memory_order_acquire);
 
-            if (__builtin_expect(globalEpoch_.load(std::memory_order_acquire) == epoch, 1))
+            if (globalEpoch_.load(std::memory_order_acquire) == epoch)
             {
                 return epoch;
             }
 
-            readerCounters_[counterIndex].fetch_sub(1, std::memory_order_acq_rel);
+            readerCounters_[counterIndex].fetch_sub(1, std::memory_order_release);
         } while (true);
     }
 
     void read_unlock(Epoch epoch) noexcept
     {
-        readerCounters_[static_cast<int>(epoch & 1)].fetch_sub(1, std::memory_order_release);
+        int counterIndex = static_cast<int>(epoch & 1);
+        readerCounters_[counterIndex].fetch_sub(1, std::memory_order_release);
     }
 
     void synchronize() noexcept

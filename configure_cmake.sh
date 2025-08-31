@@ -24,6 +24,7 @@ Usage: $0 [OPTION]... [VAR=VALUE]...
 
 Optional Features:
     --build-type=[Debug|Release] set cmake build type
+    --enable-unit-test           enable unit tests
     --enable-address-sanitizer   enable address sanitizer support
     --enable-ub-sanitizer        enable undefined behavior sanitizer support
     --enable-thread-sanitizer    enable thread sanitizer support
@@ -76,6 +77,9 @@ while [ $# -ne 0 ]; do
             ;;
         --verbose)
             verbose_option=ON
+            ;;
+        --enable-unit-tests)
+            append_cache_entry ENABLE_UNIT_TESTS        BOOL true
             ;;
         --enable-address-sanitizer)
             append_cache_entry ENABLE_ADDRESS_SANITIZER BOOL true
