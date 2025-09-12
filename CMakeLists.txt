@@ -36,3 +36,6 @@ if (ENABLE_UNIT_TESTS)
   enable_testing()
   add_subdirectory(tests)
 endif (ENABLE_UNIT_TESTS)
+
+# Examples
+add_subdirectory(examples)
