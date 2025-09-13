@@ -28,7 +28,6 @@ public:
         stop();
     }
 
-    // Методы с error_code
     void registerSignal(int signum, SignalCallback callback, std::error_code& ec)
     {
         registerSignalImpl(signum, std::move(callback), ec);
