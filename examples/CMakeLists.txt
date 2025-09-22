@@ -1,1 +1,3 @@
 add_subdirectory(signal_handler)
+add_subdirectory(server_manager)
+add_subdirectory(client_for_service)
