@@ -14,24 +14,24 @@ class RCUPerformanceTest : public ::testing::Test
 protected:
     struct TestResults
     {
-        double read_ops_per_sec;
-        double write_ops_per_sec;
-        double total_ops_per_sec;
-        double avg_read_latency_ns;
-        double avg_write_latency_ns;
+        double readOpsPerSec;
+        double writeOpsPerSec;
+        double totalOpsPerSec;
+        double avgReadLatencyNs;
+        double avgWriteLatencyNs;
     };
 
-    static TestResults CalculateResults(uint64_t reads, uint64_t writes, uint64_t read_time, uint64_t write_time,
-                                         int duration_sec)
+    static TestResults CalculateResults(uint64_t reads, uint64_t writes, uint64_t readTime, uint64_t writeTime,
+                                         int durationSec)
     {
         TestResults results;
 
-        results.read_ops_per_sec = static_cast<double>(reads) / duration_sec;
-        results.write_ops_per_sec = static_cast<double>(writes) / duration_sec;
-        results.total_ops_per_sec = results.read_ops_per_sec + results.write_ops_per_sec;
+        results.readOpsPerSec = static_cast<double>(reads) / durationSec;
+        results.writeOpsPerSec = static_cast<double>(writes) / durationSec;
+        results.totalOpsPerSec = results.readOpsPerSec + results.writeOpsPerSec;
 
-        results.avg_read_latency_ns = reads > 0 ? static_cast<double>(read_time) / reads : 0;
-        results.avg_write_latency_ns = writes > 0 ? static_cast<double>(write_time) / writes : 0;
+        results.avgReadLatencyNs = reads > 0 ? static_cast<double>(readTime) / reads : 0;
+        results.avgWriteLatencyNs = writes > 0 ? static_cast<double>(writeTime) / writes : 0;
 
         return results;
     }
@@ -39,66 +39,66 @@ protected:
 
 TEST_F(RCUPerformanceTest, BasicPerformance)
 {
-    const int num_readers = 4;
-    const int num_writers = 2;
-    const int test_duration_sec = 2;
+    const int numReaders = 4;
+    const int numWriters = 2;
+    const int testDurationSec = 2;
 
     RCU rcu;
     std::atomic<bool> stop{false};
-    std::atomic<int> current_data{0};
+    std::atomic<int> currentData{0};
 
     struct ThreadLocalData
     {
         uint64_t reads = 0;
         uint64_t writes = 0;
-        uint64_t read_time = 0;
-        uint64_t write_time = 0;
+        uint64_t readTime = 0;
+        uint64_t writeTime = 0;
     };
 
-    std::vector<ThreadLocalData> reader_data(num_readers);
-    std::vector<ThreadLocalData> writer_data(num_writers);
+    std::vector<ThreadLocalData> readerData(numReaders);
+    std::vector<ThreadLocalData> writerData(numWriters);
     std::vector<std::thread> threads;
 
-    for (int i = 0; i < num_readers; ++i)
+    for (int i = 0; i < numReaders; ++i)
     {
         threads.emplace_back(
             [&, i]()
             {
                 Timer timer;
-                auto& local = reader_data[i];
+                auto& local = readerData[i];
                 while (!stop.load(std::memory_order_relaxed))
                 {
                     timer.start();
 
                     auto epoch = rcu.read_lock();
-                    int value = current_data.load(std::memory_order_relaxed);
+                    int value = currentData.load(std::memory_order_relaxed);
                     volatile int nv = value * 2;
                     (void)nv;
                     rcu.read_unlock(epoch);
 
                     timer.stop();
-                    local.read_time += timer.elapsedNanoSecs();
+                    local.readTime += timer.elapsedNanoSecs();
                     local.reads++;
                 }
             });
     }
 
-    for (int i = 0; i < num_writers; ++i)
+    for (int i = 0; i < numWriters; ++i)
     {
         threads.emplace_back(
             [&, i]()
             {
                 Timer timer;
-                auto& local = writer_data[i];
+                auto& local = writerData[i];
                 while (!stop.load(std::memory_order_relaxed))
                 {
                     timer.start();
-                    int new_value = current_data.load(std::memory_order_relaxed) + 1;
-                    current_data.store(new_value, std::memory_order_release);
+                    int newValue = currentData.load(std::memory_order_relaxed) + 1;
+                    currentData.store(newValue, std::memory_order_release);
                     rcu.synchronize();
 
                     timer.stop();
-                    local.write_time += timer.elapsedNanoSecs();
+                    local.writeTime += timer.elapsedNanoSecs();
                     local.writes++;
 
                     std::this_thread::sleep_for(milliseconds(1));
@@ -106,7 +106,7 @@ TEST_F(RCUPerformanceTest, BasicPerformance)
             });
     }
 
-    std::this_thread::sleep_for(seconds(test_duration_sec));
+    std::this_thread::sleep_for(seconds(testDurationSec));
     stop.store(true, std::memory_order_relaxed);
 
     for (auto& thread : threads)
@@ -117,35 +117,35 @@ TEST_F(RCUPerformanceTest, BasicPerformance)
         }
     }
 
-    uint64_t total_reads = 0;
-    uint64_t total_writes = 0;
-    uint64_t total_read_time = 0;
-    uint64_t total_write_time = 0;
+    uint64_t totalReads = 0;
+    uint64_t totalWrites = 0;
+    uint64_t totalReadTime = 0;
+    uint64_t totalWriteTime = 0;
 
-    for (const auto& data : reader_data)
+    for (const auto& data : readerData)
     {
-        total_reads += data.reads;
-        total_read_time += data.read_time;
+        totalReads += data.reads;
+        totalReadTime += data.readTime;
     }
 
-    for (const auto& data : writer_data)
+    for (const auto& data : writerData)
     {
-        total_writes += data.writes;
-        total_write_time += data.write_time;
+        totalWrites += data.writes;
+        totalWriteTime += data.writeTime;
     }
 
-    auto results = CalculateResults(total_reads, total_writes, total_read_time, total_write_time, test_duration_sec);
+    auto results = CalculateResults(totalReads, totalWrites, totalReadTime, totalWriteTime, testDurationSec);
 
-    EXPECT_GT(results.read_ops_per_sec, 1000) << "Read operations per second should be reasonable";
-    EXPECT_GT(results.write_ops_per_sec, 100) << "Write operations per second should be reasonable";
-    EXPECT_LT(results.avg_read_latency_ns, 1000000) << "Read latency should be under 1ms";
-    EXPECT_LT(results.avg_write_latency_ns, 10000000) << "Write latency should be under 10ms";
+    EXPECT_GT(results.readOpsPerSec, 1000) << "Read operations per second should be reasonable";
+    EXPECT_GT(results.writeOpsPerSec, 100) << "Write operations per second should be reasonable";
+    EXPECT_LT(results.avgReadLatencyNs, 1000000) << "Read latency should be under 1ms";
+    EXPECT_LT(results.avgWriteLatencyNs, 10000000) << "Write latency should be under 10ms";
 
     std::cout << "RCU Performance Results:\n";
-    std::cout << "Read OPS: " << results.read_ops_per_sec << "\n";
-    std::cout << "Write OPS: " << results.write_ops_per_sec << "\n";
-    std::cout << "Avg Read Latency: " << results.avg_read_latency_ns << " ns\n";
-    std::cout << "Avg Write Latency: " << results.avg_write_latency_ns << " ns\n";
+    std::cout << "Read OPS: " << results.readOpsPerSec << "\n";
+    std::cout << "Write OPS: " << results.writeOpsPerSec << "\n";
+    std::cout << "Avg Read Latency: " << results.avgReadLatencyNs << " ns\n";
+    std::cout << "Avg Write Latency: " << results.avgWriteLatencyNs << " ns\n";
 }
 
 TEST_F(RCUPerformanceTest, MultiThreadedConsistency)
@@ -153,12 +153,12 @@ TEST_F(RCUPerformanceTest, MultiThreadedConsistency)
     RCU rcu;
     std::atomic<int> data{0};
     std::atomic<bool> stop{false};
-    std::atomic<int> consistency_errors{0};
+    std::atomic<int> consistencyErrors{0};
 
-    const int num_threads = 8;
+    const int numThreads = 8;
     std::vector<std::thread> threads;
 
-    for (int i = 0; i < num_threads; ++i)
+    for (int i = 0; i < numThreads; ++i)
     {
         threads.emplace_back(
             [&]()
@@ -170,7 +170,7 @@ TEST_F(RCUPerformanceTest, MultiThreadedConsistency)
 
                     if (value < 0)
                     {
-                        consistency_errors.fetch_add(1, std::memory_order_relaxed);
+                        consistencyErrors.fetch_add(1, std::memory_order_relaxed);
                     }
 
                     rcu.read_unlock(epoch);
@@ -196,7 +196,7 @@ TEST_F(RCUPerformanceTest, MultiThreadedConsistency)
     }
     writer.join();
 
-    EXPECT_EQ(consistency_errors.load(), 0) << "No consistency errors should occur";
+    EXPECT_EQ(consistencyErrors.load(), 0) << "No consistency errors should occur";
 }
 
 TEST_F(RCUPerformanceTest, DifferentThreadConfigurations)
@@ -238,8 +238,8 @@ TEST_F(RCUPerformanceTest, DifferentThreadConfigurations)
                 {
                     while (!stop.load())
                     {
-                        int new_value = data.load(std::memory_order_relaxed) + 1;
-                        data.store(new_value, std::memory_order_release);
+                        int newValue = data.load(std::memory_order_relaxed) + 1;
+                        data.store(newValue, std::memory_order_release);
                         rcu.synchronize();
                         std::this_thread::sleep_for(milliseconds(5));
                     }
@@ -250,7 +250,9 @@ TEST_F(RCUPerformanceTest, DifferentThreadConfigurations)
         stop.store(true);
 
         for (auto& thread : threads)
+        {
             thread.join();
+        }
 
         EXPECT_TRUE(true) << "Configuration " << readers << "R/" << writers << "W should complete without errors";
     }
