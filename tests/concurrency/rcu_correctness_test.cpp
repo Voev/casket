@@ -2,6 +2,7 @@
 #include <atomic>
 #include <thread>
 #include <vector>
+#include <iostream>
 #include "casket/concurrency/rcu.hpp"
 
 using namespace casket;
@@ -43,11 +44,6 @@ TEST_F(RCUCorrectnessTest, ViewSnapshots)
 {
     RCU rcu;
 
-    TestData* currentData = new TestData{0, "start", 0.0};
-    std::atomic<TestData*> currentPtr;
-
-    currentPtr = currentData;
-
     DataHolder holder;
     holder.ptr.store(new TestData{0, "start", 0.0}, std::memory_order_release);
 
@@ -69,12 +65,15 @@ TEST_F(RCUCorrectnessTest, ViewSnapshots)
                 }
 
                 TestData snapshot = *handle;
+                totalReads.fetch_add(1, std::memory_order_relaxed);
+
                 for (int i = 0; i < 100; ++i)
                 {
                     if (handle->value != snapshot.value || handle->timestamp != snapshot.timestamp ||
                         handle->computed != snapshot.computed)
                     {
                         inconsistencies.fetch_add(1, std::memory_order_relaxed);
+                        std::cout << "PARASHA" << std::endl;
                         break;
                     }
                 }
@@ -94,12 +93,13 @@ TEST_F(RCUCorrectnessTest, ViewSnapshots)
 
                 std::this_thread::sleep_for(milliseconds(1));
             }
-            stop.store(true);
+            stop.store(true, std::memory_order_release);
         });
 
     writer.join();
     reader.join();
 
+    std::cout <<   "Total reads: " << totalReads.load() << std::endl;
     EXPECT_EQ(inconsistencies.load(), 0) << "Reader must see consistent snapshot. Found " << inconsistencies.load()
                                          << " inconsistencies";
 }
