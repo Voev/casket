@@ -412,4 +412,16 @@ void AtomicSharedPtr<T>::destroyOldControlBlock(size_t oldPackedPtr)
     }
 }
 
+template <typename T, typename... Args>
+AtomicSharedPtr<T> make_atomic_shared(Args&&... args)
+{
+    return AtomicSharedPtr<T>(new T{std::forward<Args>(args)...});
+}
+
+template <typename T, typename... Args>
+SharedPtr<T> make_shared(Args&&... args)
+{
+    return SharedPtr<T>(new T{std::forward<Args>(args)...});
+}
+
 } // namespace casket::lock_free

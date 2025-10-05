@@ -22,14 +22,15 @@ public:
     }
 
     ~RCU() noexcept
-    {}
+    {
+    }
 
-    Epoch read_lock() noexcept
+    Epoch readLock() noexcept
     {
         Epoch epoch;
         int counterIndex;
 
-        do
+        while (true)
         {
             epoch = globalEpoch_.load(std::memory_order_acquire);
             counterIndex = static_cast<int>(epoch & 1);
@@ -42,10 +43,10 @@ public:
             }
 
             readerCounters_[counterIndex].fetch_sub(1, std::memory_order_release);
-        } while (true);
+        }
     }
 
-    void read_unlock(Epoch epoch) noexcept
+    void readUnlock(Epoch epoch) noexcept
     {
         int counterIndex = static_cast<int>(epoch & 1);
         readerCounters_[counterIndex].fetch_sub(1, std::memory_order_release);
@@ -91,7 +92,7 @@ public:
     explicit RCUReadHandle(T* data, RCU& rcu)
         : data_(data)
         , rcu_(rcu)
-        , epoch_(rcu_.read_lock())
+        , epoch_(rcu_.readLock())
     {
     }
 
@@ -99,7 +100,7 @@ public:
     {
         if (data_ != nullptr)
         {
-            rcu_.read_unlock(epoch_);
+            rcu_.readUnlock(epoch_);
         }
     }
 
@@ -149,7 +150,7 @@ public:
     {
         if (data_ != nullptr)
         {
-            rcu_.read_unlock(epoch_);
+            rcu_.readUnlock(epoch_);
             data_ = nullptr;
         }
     }

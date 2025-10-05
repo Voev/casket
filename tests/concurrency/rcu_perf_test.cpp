@@ -70,11 +70,11 @@ TEST_F(RCUPerformanceTest, BasicPerformance)
                 {
                     timer.start();
 
-                    auto epoch = rcu.read_lock();
+                    auto epoch = rcu.readLock();
                     int value = currentData.load(std::memory_order_relaxed);
                     volatile int nv = value * 2;
                     (void)nv;
-                    rcu.read_unlock(epoch);
+                    rcu.readUnlock(epoch);
 
                     timer.stop();
                     local.readTime += timer.elapsedNanoSecs();
@@ -165,7 +165,7 @@ TEST_F(RCUPerformanceTest, MultiThreadedConsistency)
             {
                 while (!stop.load(std::memory_order_relaxed))
                 {
-                    auto epoch = rcu.read_lock();
+                    auto epoch = rcu.readLock();
                     int value = data.load(std::memory_order_acquire);
 
                     if (value < 0)
@@ -173,7 +173,7 @@ TEST_F(RCUPerformanceTest, MultiThreadedConsistency)
                         consistencyErrors.fetch_add(1, std::memory_order_relaxed);
                     }
 
-                    rcu.read_unlock(epoch);
+                    rcu.readUnlock(epoch);
                 }
             });
     }
@@ -223,10 +223,10 @@ TEST_F(RCUPerformanceTest, DifferentThreadConfigurations)
                 {
                     while (!stop.load())
                     {
-                        auto epoch = rcu.read_lock();
+                        auto epoch = rcu.readLock();
                         volatile int value = data.load(std::memory_order_relaxed);
                         (void)value;
-                        rcu.read_unlock(epoch);
+                        rcu.readUnlock(epoch);
                     }
                 });
         }
