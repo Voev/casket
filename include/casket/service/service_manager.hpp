@@ -3,7 +3,10 @@
 #include <casket/nonstd/string_view.hpp>
 #include <casket/signal/signal_handler.hpp>
 #include <casket/service/binary_utils.hpp>
+
 #include <casket/lock_free/lf_object_pool.hpp>
+#include <casket/lock_free/queue.hpp>
+
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <unistd.h>
@@ -33,13 +36,13 @@ struct Connection
 {
     int fd = -1;
     bool active = false;
-    std::vector<uint8_t> read_buffer;
-    size_t pending_requests = 0;
-    size_t read_offset = 0;
-    std::chrono::steady_clock::time_point last_activity;
+    std::vector<uint8_t> readBuffer;
+    size_t pendingRequests = 0;
+    size_t readOffset = 0;
+    std::chrono::steady_clock::time_point lastActivity;
 
     Connection()
-        : read_buffer(8192)
+        : readBuffer(8192)
     {
     }
 
@@ -47,15 +50,16 @@ struct Connection
     void reset()
     {
         // Закрываем предыдущий сокет, если был
-        if (fd != -1) {
+        if (fd != -1)
+        {
             ::close(fd);
             fd = -1;
         }
         active = false;
-        pending_requests = 0;
-        read_offset = 0;
-        last_activity = std::chrono::steady_clock::now();
-        std::fill(read_buffer.begin(), read_buffer.end(), 0);
+        pendingRequests = 0;
+        readOffset = 0;
+        lastActivity = std::chrono::steady_clock::now();
+        std::fill(readBuffer.begin(), readBuffer.end(), 0);
     }
 
     // Дополнительный метод для инициализации с конкретным сокетом
@@ -63,18 +67,20 @@ struct Connection
     {
         fd = socket_fd;
         active = true;
-        read_offset = 0;
-        last_activity = std::chrono::steady_clock::now();
-        std::fill(read_buffer.begin(), read_buffer.end(), 0);
-        
-        if (fd != -1) {
+        readOffset = 0;
+        lastActivity = std::chrono::steady_clock::now();
+        std::fill(readBuffer.begin(), readBuffer.end(), 0);
+
+        if (fd != -1)
+        {
             fcntl(fd, F_SETFL, fcntl(fd, F_GETFL, 0) | O_NONBLOCK);
         }
     }
 
     void close()
     {
-        if (fd != -1) {
+        if (fd != -1)
+        {
             ::close(fd);
             fd = -1;
         }
@@ -83,22 +89,23 @@ struct Connection
 
     bool is_timed_out() const
     {
-        return std::chrono::steady_clock::now() - last_activity > std::chrono::seconds(30);
+        return std::chrono::steady_clock::now() - lastActivity > std::chrono::seconds(30);
     }
 
     // Метод для обновления времени активности
     void update_activity()
     {
-        last_activity = std::chrono::steady_clock::now();
+        lastActivity = std::chrono::steady_clock::now();
     }
 
     // Метод для добавления данных в буфер
     size_t append_to_buffer(const uint8_t* data, size_t size)
     {
-        size_t bytes_to_copy = std::min(size, read_buffer.size() - read_offset);
-        if (bytes_to_copy > 0) {
-            std::memcpy(read_buffer.data() + read_offset, data, bytes_to_copy);
-            read_offset += bytes_to_copy;
+        size_t bytes_to_copy = std::min(size, readBuffer.size() - readOffset);
+        if (bytes_to_copy > 0)
+        {
+            std::memcpy(readBuffer.data() + readOffset, data, bytes_to_copy);
+            readOffset += bytes_to_copy;
         }
         return bytes_to_copy;
     }
@@ -106,14 +113,15 @@ struct Connection
     // Метод для очистки буфера (после обработки данных)
     void clear_buffer(size_t bytes_processed)
     {
-        if (bytes_processed >= read_offset) {
-            read_offset = 0;
-        } else {
+        if (bytes_processed >= readOffset)
+        {
+            readOffset = 0;
+        }
+        else
+        {
             // Сдвигаем оставшиеся данные в начало буфера
-            std::memmove(read_buffer.data(), 
-                        read_buffer.data() + bytes_processed, 
-                        read_offset - bytes_processed);
-            read_offset -= bytes_processed;
+            std::memmove(readBuffer.data(), readBuffer.data() + bytes_processed, readOffset - bytes_processed);
+            readOffset -= bytes_processed;
         }
     }
 };
@@ -226,11 +234,30 @@ public:
             return;
         }
 
-        // Оповещаем все ждущие потоки
-        request_cv_.notify_all();
+        std::cout << "Shutting down ServiceManager..." << std::endl;
+
+        // 1. Сначала останавливаем транспорт (если используется абстрактный транспорт)
+        if (server_fd_ != -1) // Для старой версии с UNIX сокетом
+        {
+            ::close(server_fd_);
+            server_fd_ = -1;
+            ::unlink(socket_path_.c_str());
+        }
+
+        // 2. Уведомляем все ждущие потоки
+        // Без condition_variable для очереди, но есть другие механизмы:
         timeout_cv_.notify_all();
 
-        // Ждем завершения воркеров
+        // 3. Посылаем фейковые задания в очередь, чтобы разбудить воркеров
+        const size_t num_workers = workers_.size();
+        for (size_t i = 0; i < num_workers * 2; ++i)
+        {
+            // Добавляем специальный индикатор остановки
+            // Используем максимальный индекс, который заведомо невалиден
+            requestQueue_.push(std::numeric_limits<size_t>::max());
+        }
+
+        // 4. Ждем завершения воркеров
         for (auto& worker : workers_)
         {
             if (worker.joinable())
@@ -239,25 +266,25 @@ public:
             }
         }
 
-        // Ждем завершения таймерного потока
+        // 5. Ждем завершения таймерного потока
         if (timeout_thread_.joinable())
         {
             timeout_thread_.join();
         }
 
-        // Закрываем серверный сокет
-        if (server_fd_ != -1)
-        {
-            ::close(server_fd_);
-            server_fd_ = -1;
-        }
-
-        // Закрываем все клиентские соединения
+        // 7. Закрываем все клиентские соединения
         close_all_connections();
 
-        ::unlink(socket_path_.c_str());
+        // 8. Очищаем очередь запросов
+        clear_request_queue();
 
-        std::cout << "ServiceManager stopped" << std::endl;
+        // 9. Останавливаем обработчик сигналов
+        signal_handler_.stop();
+
+        // 10. Дополнительная очистка для гарантии отсутствия утечек
+        cleanup_resources();
+
+        std::cout << "ServiceManager stopped successfully" << std::endl;
     }
 
     void run()
@@ -324,6 +351,59 @@ private:
     std::pair<size_t, Connection*> acquire_connection(int fd);
     void release_connection(size_t index);
 
+    void clear_request_queue()
+    {
+        size_t cleared_count = 0;
+        while (true)
+        {
+            auto req_index_opt = requestQueue_.pop();
+            if (!req_index_opt)
+            {
+                break;
+            }
+
+            size_t index = req_index_opt.value();
+            // Пропускаем специальные индикаторы остановки
+            if (index < requests_.capacity())
+            {
+                requests_.releaseSlot(index);
+                cleared_count++;
+            }
+        }
+
+        stats_.pending_requests.store(0, std::memory_order_release);
+
+        if (cleared_count > 0)
+        {
+            std::cout << "Cleared " << cleared_count << " pending requests from queue" << std::endl;
+        }
+    }
+
+       void cleanup_resources()
+    {
+        // Гарантируем, что все соединения закрыты
+        for (size_t i = 0; i < connections_.capacity(); ++i)
+        {
+            connections_.withObject(i, [](Connection& conn)
+            {
+                if (conn.fd != -1)
+                {
+                    ::close(conn.fd);
+                    conn.fd = -1;
+                    conn.active = false;
+                }
+            });
+            connections_.releaseSlot(i);
+        }
+        
+        // Очищаем статистику
+        stats_.active_connections.store(0, std::memory_order_release);
+        stats_.pending_requests.store(0, std::memory_order_release);
+        
+        // Сбрасываем флаги
+        server_fd_ = -1;
+    }
+
     // Вспомогательные методы
     Connection* find_connection(int fd);
     void check_connection_timeouts();
@@ -342,9 +422,7 @@ private:
     LfObjectPool<Request> requests_;
 
     // Очередь запросов
-    std::mutex queue_mutex_;
-    std::condition_variable request_cv_;
-    std::vector<size_t> request_queue_;
+    lock_free::Queue<size_t> requestQueue_;
 
     // Обработчики сигналов
     SignalHandler signal_handler_;

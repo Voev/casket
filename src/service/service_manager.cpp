@@ -16,13 +16,9 @@ void ServiceManager::setup_default_signals()
                                         this->stop();
                                     });
 
-    signal_handler_.registerSignal(SIGHUP,
-                                   [this](int signum)
-                                   {
-                                       std::cout << "Received SIGHUP " << signum << ", reloading configuration..."
-                                                 << std::endl;
-                                       // Реализация перезагрузки конфигурации
-                                   });
+    signal_handler_.registerSignal(
+        SIGHUP, [this](int signum)
+        { std::cout << "Received SIGHUP " << signum << ", reloading configuration..." << std::endl; });
 
     signal_handler_.registerSignal(SIGUSR1,
                                    [this](int signum)
@@ -51,13 +47,13 @@ void ServiceManager::setup_poll_fds(std::vector<pollfd>& fds)
     }
 
     // Client connections
-    auto active_connections = connections_.get_active_objects();
+    auto active_connections = connections_.getActiveObjects();
     for (Connection* conn : active_connections)
     {
         if (conn && conn->fd != -1)
         {
             short events = POLLIN;
-            if (conn->pending_requests > 0)
+            if (conn->pendingRequests > 0)
             {
                 events |= POLLOUT;
             }
@@ -145,31 +141,26 @@ void ServiceManager::accept_connection()
 
 std::pair<size_t, Connection*> ServiceManager::acquire_connection(int fd)
 {
-    auto result = connections_.acquire_slot([fd](Connection& conn) {
-        conn.initialize(fd);
-    });
-    
-    if (result.second) {
+    auto result = connections_.acquireSlot([fd](Connection& conn) { conn.initialize(fd); });
+
+    if (result.second)
+    {
         stats_.active_connections.fetch_add(1, std::memory_order_relaxed);
     }
-    
+
     return result;
 }
 
 void ServiceManager::release_connection(size_t index)
 {
-    connections_.with_object(index, [](Connection& conn) {
-        conn.close();
-    });
-    connections_.release_slot(index);
+    connections_.withObject(index, [](Connection& conn) { conn.close(); });
+    connections_.releaseSlot(index);
     stats_.active_connections.fetch_sub(1, std::memory_order_relaxed);
 }
 
 Connection* ServiceManager::find_connection(int fd)
 {
-    return connections_.find_object([fd](const Connection& conn) {
-        return conn.fd == fd;
-    });
+    return connections_.findObject([fd](const Connection& conn) { return conn.fd == fd; });
 }
 
 void ServiceManager::handle_client_input(int fd)
@@ -181,20 +172,20 @@ void ServiceManager::handle_client_input(int fd)
     }
 
     ssize_t bytes_read;
-    size_t offset = conn->read_offset;
+    size_t offset = conn->readOffset;
 
-    while ((bytes_read = ::read(conn->fd, conn->read_buffer.data() + offset, conn->read_buffer.size() - offset)) > 0)
+    while ((bytes_read = ::read(conn->fd, conn->readBuffer.data() + offset, conn->readBuffer.size() - offset)) > 0)
     {
         offset += bytes_read;
-        conn->read_offset = offset;
+        conn->readOffset = offset;
         conn->update_activity();
 
         process_client_buffer(conn);
 
         // Динамическое увеличение буфера при необходимости
-        if (offset >= conn->read_buffer.size() - 256)
+        if (offset >= conn->readBuffer.size() - 256)
         {
-            conn->read_buffer.resize(conn->read_buffer.size() * 2);
+            conn->readBuffer.resize(conn->readBuffer.size() * 2);
         }
     }
 
@@ -215,18 +206,21 @@ void ServiceManager::handle_client_error(int fd)
     // Ищем и закрываем соединение
     for (size_t i = 0; i < connections_.capacity(); ++i)
     {
-        connections_.with_object(i, [fd](Connection& conn) {
-            if (conn.fd == fd) {
-                conn.close();
-            }
-        });
+        connections_.withObject(i,
+                                [fd](Connection& conn)
+                                {
+                                    if (conn.fd == fd)
+                                    {
+                                        conn.close();
+                                    }
+                                });
     }
 }
 
 void ServiceManager::process_client_buffer(Connection* conn)
 {
-    size_t offset = conn->read_offset;
-    uint8_t* data = conn->read_buffer.data();
+    size_t offset = conn->readOffset;
+    uint8_t* data = conn->readBuffer.data();
 
     while (offset >= sizeof(uint32_t))
     {
@@ -254,21 +248,19 @@ void ServiceManager::process_client_buffer(Connection* conn)
                 request_data.push_back(message_start[i]);
             }
 
-            auto [req_index, req] = requests_.acquire_slot([&](Request& req) {
-                req.client_fd = conn->fd;
-                req.request_data = std::move(request_data);
-            });
-            
+            auto [req_index, req] = requests_.acquireSlot(
+                [&](Request& req)
+                {
+                    req.client_fd = conn->fd;
+                    req.request_data = std::move(request_data);
+                });
+
             if (req)
             {
-                {
-                    std::lock_guard lock(queue_mutex_);
-                    request_queue_.push_back(req_index);
-                }
+                requestQueue_.push(req_index);
 
-                conn->pending_requests++;
+                conn->pendingRequests++;
                 stats_.pending_requests.fetch_add(1, std::memory_order_relaxed);
-                request_cv_.notify_one();
 
                 // Сдвигаем буфер
                 size_t total_length = sizeof(uint32_t) + message_length;
@@ -282,58 +274,59 @@ void ServiceManager::process_client_buffer(Connection* conn)
         }
     }
 
-    conn->read_offset = offset;
+    conn->readOffset = offset;
 }
 
 void ServiceManager::worker_loop()
 {
     while (running_.load(std::memory_order_acquire))
     {
-        std::optional<size_t> req_index;
-
+        // БЕЗ МЬЮТЕКСА - lock-free операция
+        auto req_index_opt = requestQueue_.pop();
+        
+        if (!req_index_opt)
         {
-            std::unique_lock lock(queue_mutex_);
-            request_cv_.wait_for(lock, std::chrono::milliseconds(100), [this]
-                                 { return !request_queue_.empty() || !running_.load(std::memory_order_acquire); });
-
-            if (!running_.load(std::memory_order_acquire))
+            // Если очередь пуста и сервер еще работает
+            if (running_.load(std::memory_order_acquire))
             {
-                break;
+                // Умная пауза: меньше паузы при высокой нагрузке
+                static thread_local size_t empty_cycles = 0;
+                if (empty_cycles++ < 100)
+                {
+                    std::this_thread::yield();
+                }
+                else
+                {
+                    std::this_thread::sleep_for(std::chrono::microseconds(100));
+                    empty_cycles = 0;
+                }
             }
-
-            if (request_queue_.empty())
-            {
-                continue;
-            }
-
-            req_index = request_queue_.front();
-            request_queue_.erase(request_queue_.begin());
+            continue;
         }
 
-        if (req_index.has_value())
+        size_t req_index = req_index_opt.value();
+
+        if (req_index < requests_.capacity())
         {
-            if (req_index.value() < requests_.capacity())
+            Request* req = requests_.getObject(req_index);
+            if (req)
             {
-                Request* req = requests_.get_object(req_index.value());
-                if (req)
+                process_single_request(req);
+
+                // Отправляем ответ
+                if (req->client_fd != -1)
                 {
-                    process_single_request(req);
+                    send_response(req->client_fd, req->response_data);
 
-                    // Отправляем ответ
-                    if (req->client_fd != -1)
+                    // Уменьшаем счетчик pending requests для соединения
+                    Connection* conn = find_connection(req->client_fd);
+                    if (conn)
                     {
-                        send_response(req->client_fd, req->response_data);
-
-                        // Уменьшаем счетчик pending requests для соединения
-                        Connection* conn = find_connection(req->client_fd);
-                        if (conn)
-                        {
-                            conn->pending_requests--;
-                        }
+                        conn->pendingRequests--;
                     }
-
-                    requests_.release_slot(req_index.value());
                 }
+
+                requests_.releaseSlot(req_index);
             }
         }
 
@@ -345,7 +338,6 @@ void ServiceManager::worker_loop()
         }
     }
 }
-
 void ServiceManager::timeout_check_loop()
 {
     while (running_.load(std::memory_order_acquire))
@@ -359,64 +351,97 @@ void ServiceManager::timeout_check_loop()
 
 void ServiceManager::check_connection_timeouts()
 {
-    auto active_connections = connections_.get_active_objects();
+    auto active_connections = connections_.getActiveObjects();
     for (Connection* conn : active_connections)
     {
         if (conn && conn->is_timed_out())
         {
-            if (conn->pending_requests == 0)
+            if (conn->pendingRequests == 0)
             {
                 std::cout << "Closing timed out connection fd=" << conn->fd << std::endl;
                 // Находим индекс и освобождаем
                 for (size_t i = 0; i < connections_.capacity(); ++i)
                 {
-                    connections_.with_object(i, [&](Connection& c) {
-                        if (&c == conn) {
-                            c.close();
-                            connections_.release_slot(i);
-                            stats_.connection_timeouts.fetch_add(1, std::memory_order_relaxed);
-                        }
-                    });
+                    connections_.withObject(i,
+                                            [&](Connection& c)
+                                            {
+                                                if (&c == conn)
+                                                {
+                                                    c.close();
+                                                    connections_.releaseSlot(i);
+                                                    stats_.connection_timeouts.fetch_add(1, std::memory_order_relaxed);
+                                                }
+                                            });
                 }
             }
         }
     }
 }
 
-
 void ServiceManager::check_request_timeouts()
 {
-    std::lock_guard lock(queue_mutex_);
-    for (auto it = request_queue_.begin(); it != request_queue_.end();)
+    // Внимание: С lock-free очередью мы не можем просто итерировать по элементам
+    // Одна из стратегий:
+    // 1. Создаем временную очередь для не-таймаутных запросов
+    // 2. Или используем отдельную структуру для отслеживания таймаутов
+    
+    // Вариант 1: Используем временную очередь
+    lock_free::Queue<size_t> temp_queue;
+    size_t timed_out_count = 0;
+    
+    while (true)
     {
-        size_t req_index = *it;
+        auto req_index_opt = requestQueue_.pop();
+        if (!req_index_opt)
+        {
+            break;
+        }
+        
+        size_t req_index = req_index_opt.value();
         bool timed_out = false;
         int client_fd = -1;
-
-        requests_.with_object(req_index, [&](Request& req) {
-            timed_out = req.is_timed_out();
-            client_fd = req.client_fd;
-        });
-
+        
+        requests_.withObject(req_index,
+                             [&](Request& req)
+                             {
+                                 timed_out = req.is_timed_out();
+                                 client_fd = req.client_fd;
+                             });
+        
         if (timed_out)
         {
             std::cerr << "Request timeout for fd=" << client_fd << std::endl;
 
-            // Уменьшаем счетчик для соединения
             if (Connection* conn = find_connection(client_fd))
             {
-                conn->pending_requests--;
+                conn->pendingRequests--;
             }
 
-            // Освобождаем слот и удаляем из очереди
-            requests_.release_slot(req_index);
-            it = request_queue_.erase(it);
+            requests_.releaseSlot(req_index);
             stats_.request_timeouts.fetch_add(1, std::memory_order_relaxed);
+            timed_out_count++;
         }
         else
         {
-            ++it;
+            // Возвращаем обратно в новую очередь
+            temp_queue.push(req_index);
         }
+    }
+    
+    // Переносим все обратно в основную очередь
+    while (true)
+    {
+        auto req_index_opt = temp_queue.pop();
+        if (!req_index_opt)
+        {
+            break;
+        }
+        requestQueue_.push(req_index_opt.value());
+    }
+    
+    if (timed_out_count > 0)
+    {
+        std::cout << "Removed " << timed_out_count << " timed out requests" << std::endl;
     }
 }
 
@@ -504,7 +529,7 @@ bool ServiceManager::send_response(int client_fd, const BinaryResponse& response
         remaining -= sent;
     }
 
-    conn->last_activity = std::chrono::steady_clock::now();
+    conn->lastActivity = std::chrono::steady_clock::now();
     return true;
 }
 
@@ -512,21 +537,20 @@ void ServiceManager::close_all_connections()
 {
     for (size_t i = 0; i < connections_.capacity(); ++i)
     {
-        connections_.with_object(i, [](Connection& conn) {
-            conn.close();
-        });
-        connections_.release_slot(i);
+        connections_.withObject(i, [](Connection& conn) { conn.close(); });
+        connections_.releaseSlot(i);
     }
     stats_.active_connections.store(0, std::memory_order_release);
 
-    // Очищаем очередь запросов
+    // Очищаем очередь запросов (lock-free)
+    while (true)
     {
-        std::lock_guard lock(queue_mutex_);
-        for (auto req_index : request_queue_)
+        auto req_index_opt = requestQueue_.pop();
+        if (!req_index_opt)
         {
-            requests_.release_slot(req_index);
+            break;
         }
-        request_queue_.clear();
+        requests_.releaseSlot(req_index_opt.value());
     }
     stats_.pending_requests.store(0, std::memory_order_release);
 }
