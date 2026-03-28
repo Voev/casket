@@ -46,25 +46,25 @@ TEST_F(IntrusiveListTest, IsInitiallyEmpty)
 TEST_F(IntrusiveListTest, PushFrontWorks)
 {
     list.push_front(*node1);
-    ASSERT_EQ(list.front().value, 1);
-    ASSERT_EQ(list.back().value, 1);
+    ASSERT_EQ(list.front()->value, 1);
+    ASSERT_EQ(list.back()->value, 1);
     ASSERT_EQ(list.size(), 1);
 
     list.push_front(*node2);
-    ASSERT_EQ(list.front().value, 2);
-    ASSERT_EQ(list.back().value, 1);
+    ASSERT_EQ(list.front()->value, 2);
+    ASSERT_EQ(list.back()->value, 1);
     ASSERT_EQ(list.size(), 2);
 }
 
 TEST_F(IntrusiveListTest, PushBackWorks)
 {
     list.push_back(*node1);
-    ASSERT_EQ(list.front().value, 1);
-    ASSERT_EQ(list.back().value, 1);
+    ASSERT_EQ(list.front()->value, 1);
+    ASSERT_EQ(list.back()->value, 1);
 
     list.push_back(*node2);
-    ASSERT_EQ(list.front().value, 1);
-    ASSERT_EQ(list.back().value, 2);
+    ASSERT_EQ(list.front()->value, 1);
+    ASSERT_EQ(list.back()->value, 2);
 }
 
 TEST_F(IntrusiveListTest, IterationWorks)
@@ -96,8 +96,8 @@ TEST_F(IntrusiveListTest, RemoveFromMiddle)
 
     list.remove(*node2);
     ASSERT_EQ(list.size(), 2);
-    ASSERT_EQ(list.front().value, 1);
-    ASSERT_EQ(list.back().value, 3);
+    ASSERT_EQ(list.front()->value, 1);
+    ASSERT_EQ(list.back()->value, 3);
     ASSERT_EQ(node2->next, nullptr);
     ASSERT_EQ(node2->prev, nullptr);
 }
@@ -109,7 +109,7 @@ TEST_F(IntrusiveListTest, RemoveFirst)
 
     list.remove(*node1);
     ASSERT_EQ(list.size(), 1);
-    ASSERT_EQ(list.front().value, 2);
+    ASSERT_EQ(list.front()->value, 2);
 }
 
 TEST_F(IntrusiveListTest, RemoveLast)
@@ -119,7 +119,7 @@ TEST_F(IntrusiveListTest, RemoveLast)
 
     list.remove(*node2);
     ASSERT_EQ(list.size(), 1);
-    ASSERT_EQ(list.back().value, 1);
+    ASSERT_EQ(list.back()->value, 1);
 }
 
 TEST_F(IntrusiveListTest, ClearWorks)
@@ -174,8 +174,8 @@ TEST_F(IntrusiveListTest, ConstMethodsWork)
     list.push_back(*node2);
 
     const auto& const_list = list;
-    ASSERT_EQ(const_list.front().value, 1);
-    ASSERT_EQ(const_list.back().value, 2);
+    ASSERT_EQ(const_list.front()->value, 1);
+    ASSERT_EQ(const_list.back()->value, 2);
     ASSERT_EQ(const_list.size(), 2);
     ASSERT_FALSE(const_list.empty());
 }
