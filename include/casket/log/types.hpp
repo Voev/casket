@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include <casket/utils/string.hpp>
 
 namespace casket
 {
@@ -21,5 +22,40 @@ inline const char* LevelToString(LogLevel level)
     static const char* names[] = {"EMR", "ALR", "CRT", "ERR", "WRN", "NTC", "INF", "DBG"};
     return names[static_cast<uint8_t>(level)];
 }
+
+inline LogLevel StringToLevel(nonstd::string_view str)
+{
+    if (iequals(str, "alert"))
+    {
+        return LogLevel::ALERT;
+    }
+    else if (iequals(str, "crit"))
+    {
+        return LogLevel::CRITICAL;
+    }
+    else if (iequals(str, "error"))
+    {
+        return LogLevel::ERROR;
+    }
+    else if (iequals(str, "warn"))
+    {
+        return LogLevel::WARNING;
+    }
+    else if (iequals(str, "notice"))
+    {
+        return LogLevel::NOTICE;
+    }
+    else if (iequals(str, "info"))
+    {
+        return LogLevel::INFO;
+    }
+    else if (iequals(str, "debug"))
+    {
+        return LogLevel::DEBUG;
+    }
+
+    return LogLevel::EMERGENCY;
+}
+
 
 } // namespace casket

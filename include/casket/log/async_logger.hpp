@@ -1,204 +1,66 @@
 #pragma once
 
-#include <cstdarg>
-#include <cstring>
-#include <chrono>
-#include <cstdio>
-
 #include <casket/log/types.hpp>
 #include <casket/log/sink.hpp>
-#include <casket/log/log_config.hpp>
+#include <casket/log/log_record.hpp>
 
-#include <casket/lock_free/lf_object_pool.hpp>
-#include <casket/lock_free/mpsc_queue.hpp>
+#include <casket/lock_free/lf_ring_buffer.hpp>
 
 namespace casket
 {
 
-class AsyncLogger final
+class AsyncLogger
 {
-public:
-    struct Config
+    using MessageBuffer = lf::RingBuffer<LogRecord, 4096>;
+
+    template <size_t>
+    friend class LogWorker;
+
+    MessageBuffer buffer_;
+    std::atomic<LogLevel> level_{LogLevel::WARNING};
+
+    AsyncLogger()
     {
-        size_t queue_size = 16384; // размер очереди (степень двойки)
-        size_t max_msg_size = 512; // максимальный размер сообщения
-        size_t pool_size = 65536;  // размер пула записей
-        LogLevel min_level = LogLevel::DEBUG;
-        bool enable_stats = true;
-    };
-
-    struct Record
-    {
-        LogLevel level;
-        uint16_t msg_len;
-        char data[512];
-
-        void set(LogLevel lvl, const char* msg, size_t len)
-        {
-            level = lvl;
-            msg_len = static_cast<uint16_t>(std::min(len, sizeof(data) - 1));
-            memcpy(data, msg, msg_len);
-            data[msg_len] = '\0';
-        }
-    };
-
-private:
-    Config config_;
-    ObjectPool<Record, 8192> pool_;
-    MPSCQueue<Record> queue_;
-
-    std::atomic<uint64_t> total_produced_{0};
-    std::atomic<uint64_t> total_dropped_{0};
+    }
 
 public:
-    explicit AsyncLogger(const Config& config)
-        : config_(config)
-        , queue_(config_.queue_size)
+    ~AsyncLogger() noexcept
     {
     }
 
-    // запрещаем копирование
-    AsyncLogger(const AsyncLogger&) = delete;
-    AsyncLogger& operator=(const AsyncLogger&) = delete;
-
-    ListNode<Record>* acquireRecord() noexcept
+    static AsyncLogger& getInstance()
     {
-        auto* node = pool_.acquire();
-        if (!node)
+        static AsyncLogger g_Logger;
+        return g_Logger;
+    }
+
+    LogLevel getLevel() const noexcept
+    {
+        return level_.load(std::memory_order_relaxed);
+    }
+
+    template <typename... Args>
+    bool logf(const LogLevel& level, const char* format, Args&&... args)
+    {
+        LogRecord record(level);
+        record.format(format, std::forward<Args>(args)...);
+
+        if (buffer_.try_push(std::move(record)))
         {
-            if (config_.enable_stats)
-            {
-                total_dropped_.fetch_add(1, std::memory_order_relaxed);
-            }
-        }
-        return node;
-    }
-
-    void releaseRecord(ListNode<Record>* node) noexcept
-    {
-        pool_.release(node);
-    }
-
-    bool produce(ListNode<Record>* node) noexcept
-    {
-        if (!node)
-        {
-            return false;
+            return true;
         }
 
-        if (config_.enable_stats)
-        {
-            total_produced_.fetch_add(1, std::memory_order_relaxed);
-        }
-
-        if (!queue_.push(node))
-        {
-            pool_.release(node);
-            if (config_.enable_stats)
-            {
-                total_dropped_.fetch_add(1, std::memory_order_relaxed);
-            }
-            return false;
-        }
-
-        if (config_.enable_stats)
-        {
-            total_produced_.fetch_add(1, std::memory_order_relaxed);
-        }
-
-        return true;
+        return false;
     }
 
-    ListNode<Record>* consume() noexcept
+    size_t pendingMessages() const
     {
-        return queue_.pop();
+        return buffer_.size();
     }
 
-    bool log(LogLevel level, const char* msg, size_t len) noexcept
+    bool isOverloaded() const
     {
-        if (level > config_.min_level)
-            return false;
-
-        if (len >= config_.max_msg_size)
-        {
-            len = config_.max_msg_size - 1;
-        }
-
-        auto* node = acquireRecord();
-        if (!node)
-        {
-            return false;
-        }
-
-        node->elem.set(level, msg, len);
-
-        return produce(node);
-    }
-
-    bool logf(LogLevel level, const char* fmt, ...)
-    {
-        if (level > config_.min_level)
-            return false;
-
-        auto* node = acquireRecord();
-        if (!node)
-        {
-            return false;
-        }
-
-        va_list args;
-        va_start(args, fmt);
-        int len = vsnprintf(node->elem.data, config_.max_msg_size, fmt, args);
-        va_end(args);
-
-        if (len <= 0)
-        {
-            releaseRecord(node);
-            return false;
-        }
-
-        node->elem.level = level;
-        node->elem.msg_len = len;
-
-        return produce(node);
-    }
-
-    /// @brief Проверить, пуста ли очередь
-    bool empty() const noexcept
-    {
-        return queue_.empty();
-    }
-
-    // ========================================================================
-    // Управление
-    // ========================================================================
-
-    void setMinLevel(LogLevel level) noexcept
-    {
-        config_.min_level = level;
-    }
-
-    LogLevel getMinLevel() const noexcept
-    {
-        return config_.min_level;
-    }
-
-    struct Stats
-    {
-        uint64_t produced;
-        uint64_t dropped;
-        size_t pool_available;
-        size_t pool_capacity;
-        size_t queue_capacity;
-    };
-
-    Stats getStats() const noexcept
-    {
-        return Stats{total_produced_.load(std::memory_order_relaxed),
-                     total_dropped_.load(std::memory_order_relaxed),
-                     pool_.available(),
-                     pool_.capacity(),
-                     queue_.capacity()};
+        return buffer_.full();
     }
 };
 
@@ -230,3 +92,22 @@ public:
 
 #define LOG_FORMAT_N(n, ...) CONCAT(LOG_FORMAT_, n)(__VA_ARGS__)
 #define LOG_FORMAT_FOR(...) LOG_FORMAT_N(VA_NARGS(__VA_ARGS__), __VA_ARGS__)
+
+#define LOG_IMPL(level_enum, fmt, ...)                                                                                 \
+    do                                                                                                                 \
+    {                                                                                                                  \
+        auto& _logger = casket::AsyncLogger::getInstance();                                                            \
+        if ((level_enum) >= _logger.getLevel())                                                                        \
+        {                                                                                                              \
+            _logger.logf(level_enum, fmt, ##__VA_ARGS__);                                                              \
+        }                                                                                                              \
+    } while (0)
+
+#define LOG_EMERGENCY(fmt, ...) LOG_IMPL(casket::LogLevel::EMERGENCY, fmt, ##__VA_ARGS__)
+#define LOG_ALERT(fmt, ...) LOG_IMPL(casket::LogLevel::ALERT, fmt, ##__VA_ARGS__)
+#define LOG_CRITICAL(fmt, ...) LOG_IMPL(casket::LogLevel::CRITICAL, fmt, ##__VA_ARGS__)
+#define LOG_ERROR(fmt, ...) LOG_IMPL(casket::LogLevel::ERROR, fmt, ##__VA_ARGS__)
+#define LOG_WARNING(fmt, ...) LOG_IMPL(casket::LogLevel::WARNING, fmt, ##__VA_ARGS__)
+#define LOG_NOTICE(fmt, ...) LOG_IMPL(casket::LogLevel::NOTICE, fmt, ##__VA_ARGS__)
+#define LOG_INFO(fmt, ...) LOG_IMPL(casket::LogLevel::INFO, fmt, ##__VA_ARGS__)
+#define LOG_DEBUG(fmt, ...) LOG_IMPL(casket::LogLevel::DEBUG, fmt, ##__VA_ARGS__)

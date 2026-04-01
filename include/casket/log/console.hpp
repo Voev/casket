@@ -12,11 +12,11 @@ namespace casket
 
 struct ConsoleSinkConfig
 {
-    bool use_colors = true;     // использовать ANSI цвета
-    bool auto_flush = false;    // автоматически сбрасывать после каждого сообщения
-    bool show_timestamp = true; // показывать временные метки
-    bool show_level = true;     // показывать уровень логирования
-    FILE* output = stdout;      // куда писать (stdout или stderr)
+    bool use_colors = true;
+    bool auto_flush = false;
+    bool show_timestamp = true;
+    bool show_level = true;
+    FILE* output = stdout;
 
     ConsoleSinkConfig() = default;
 };
@@ -64,7 +64,6 @@ private:
         }
     }
 
-    // форматирование timestamp (локальный буфер для производительности)
     void formatTimestamp(char* buffer, size_t size, uint64_t timestamp_us) const
     {
         time_t sec = timestamp_us / 1000000;
