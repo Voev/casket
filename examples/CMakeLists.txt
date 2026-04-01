@@ -1,1 +1,2 @@
 add_subdirectory(signal_handler)
+add_subdirectory(log_manager)
