@@ -3,7 +3,6 @@
 #include <iomanip>
 #include <sstream>
 #include <casket/log/console.hpp>
-#include <casket/log/color.hpp>
 
 namespace
 {
