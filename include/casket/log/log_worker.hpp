@@ -1,5 +1,7 @@
 #pragma once
 #include <thread>
+#include <memory>
+#include <vector>
 #include <casket/log/async_logger.hpp>
 
 namespace casket
@@ -9,7 +11,7 @@ template <size_t BatchSize = 8192>
 class LogWorker final
 {
 private:
-    std::vector<LogSink*> sinks_;
+    std::vector<std::unique_ptr<LogSink>> sinks_;
     std::thread workerThread_;
     std::atomic<bool> running_{true};
 
@@ -23,10 +25,18 @@ private:
     } stats_;
 
 public:
-    LogWorker(std::initializer_list<LogSink*> sinks)
-        : sinks_(sinks)
+    explicit LogWorker(std::vector<std::unique_ptr<LogSink>> sinks)
+        : sinks_(std::move(sinks))
     {
         workerThread_ = std::thread([this]() { run(); });
+    }
+
+    template <typename... Sinks>
+    explicit LogWorker(Sinks&&... sinks)
+    {
+        sinks_.reserve(sizeof...(sinks));
+        (sinks_.emplace_back(std::forward<Sinks>(sinks)), ...);
+        workerThread_ = std::thread([this] { run(); });
     }
 
     ~LogWorker() noexcept
@@ -34,11 +44,6 @@ public:
         if (workerThread_.joinable())
         {
             workerThread_.join();
-        }
-
-        for (auto* sink : sinks_)
-        {
-            delete sink;
         }
     }
 
@@ -99,9 +104,9 @@ private:
 
     inline void spill(const LogRecord& record)
     {
-        for (auto* sink : sinks_)
+        for (auto& sink : sinks_)
         {
-            dispatchToSink(sink, record);
+            dispatchToSink(sink.get(), record);
         }
     }
 

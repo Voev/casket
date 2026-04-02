@@ -12,10 +12,10 @@ namespace casket
 
 struct ConsoleSinkConfig
 {
-    bool use_colors = true;
-    bool auto_flush = false;
-    bool show_timestamp = true;
-    bool show_level = true;
+    bool useColors = true;
+    bool autoFlush = false;
+    bool showTimestamp = true;
+    bool showLevel = true;
     FILE* output = stdout;
 
     ConsoleSinkConfig() = default;
@@ -38,7 +38,7 @@ private:
 
     const char* getColor(LogLevel level) const noexcept
     {
-        if (!config_.use_colors)
+        if (!config_.useColors)
             return "";
 
         switch (level)
@@ -88,12 +88,7 @@ public:
     {
     }
 
-    ConsoleSink(bool use_colors, bool auto_flush = false, FILE* output = stdout)
-        : config_{use_colors, auto_flush, true, true, output}
-    {
-    }
-
-    ~ConsoleSink() override = default;
+    ~ConsoleSink() noexcept = default;
 
     void emergency(const char* msg, size_t len) override
     {
@@ -142,28 +137,28 @@ public:
 
     void setUseColors(bool enable) noexcept
     {
-        config_.use_colors = enable;
+        config_.useColors = enable;
     }
 
     void setAutoFlush(bool enable) noexcept
     {
-        config_.auto_flush = enable;
+        config_.autoFlush = enable;
     }
 
     void setShowTimestamp(bool enable) noexcept
     {
-        config_.show_timestamp = enable;
+        config_.showTimestamp = enable;
     }
 
     void setShowLevel(bool enable) noexcept
     {
-        config_.show_level = enable;
+        config_.showLevel = enable;
     }
 
 private:
     void write(LogLevel level, const char* msg, size_t len) noexcept
     {
-        if (config_.show_timestamp)
+        if (config_.showTimestamp)
         {
             auto now = std::chrono::steady_clock::now();
             uint64_t timestamp_us =
@@ -174,17 +169,17 @@ private:
             fprintf(config_.output, "[%s] ", timebuf);
         }
 
-        if (config_.show_level)
+        if (config_.showLevel)
         {
-            const char* color = config_.use_colors ? getColor(level) : "";
-            const char* reset = config_.use_colors ? COLOR_RESET : "";
+            const char* color = config_.useColors ? getColor(level) : "";
+            const char* reset = config_.useColors ? COLOR_RESET : "";
             fprintf(config_.output, "[%s%-3s%s] ", color, LevelToString(level), reset);
         }
 
         fwrite(msg, 1, len, config_.output);
         fprintf(config_.output, "\n");
 
-        if (config_.auto_flush)
+        if (config_.autoFlush)
         {
             fflush(config_.output);
         }
