@@ -133,47 +133,48 @@ inline const char* getFileName(const char* path)
 }
 } // namespace casket::log_detail
 
-#define LOG_IMPL(level_enum, fmt, ...)                                                                                 \
+#define CSK_LOG_IMPL(level, fmt, ...)                                                                                  \
     do                                                                                                                 \
     {                                                                                                                  \
         auto& _logger = casket::AsyncLogger::getInstance();                                                            \
-        if ((level_enum) <= _logger.getLevel())                                                                        \
+        if ((level) <= _logger.getLevel())                                                                             \
         {                                                                                                              \
-            _logger.logf(level_enum, fmt, ##__VA_ARGS__);                                                              \
+            _logger.logf(level, fmt, ##__VA_ARGS__);                                                                   \
         }                                                                                                              \
     } while (0)
 
 #ifdef NDEBUG
-#define LOG_EMERGENCY(fmt, ...) LOG_IMPL(casket::LogLevel::EMERGENCY, fmt, ##__VA_ARGS__)
-#define LOG_ALERT(fmt, ...) LOG_IMPL(casket::LogLevel::ALERT, fmt, ##__VA_ARGS__)
-#define LOG_CRITICAL(fmt, ...) LOG_IMPL(casket::LogLevel::CRITICAL, fmt, ##__VA_ARGS__)
-#define LOG_ERROR(fmt, ...) LOG_IMPL(casket::LogLevel::ERROR, fmt, ##__VA_ARGS__)
-#define LOG_WARNING(fmt, ...) LOG_IMPL(casket::LogLevel::WARNING, fmt, ##__VA_ARGS__)
-#define LOG_NOTICE(fmt, ...) LOG_IMPL(casket::LogLevel::NOTICE, fmt, ##__VA_ARGS__)
-#define LOG_INFO(fmt, ...) LOG_IMPL(casket::LogLevel::INFO, fmt, ##__VA_ARGS__)
-#define LOG_DEBUG(fmt, ...) LOG_IMPL(casket::LogLevel::DEBUG, fmt, ##__VA_ARGS__)
+#define CSK_LOG_EMERGENCY(fmt, ...) CSK_LOG_IMPL(casket::LogLevel::EMERGENCY, fmt, ##__VA_ARGS__)
+#define CSK_LOG_ALERT(fmt, ...) CSK_LOG_IMPL(casket::LogLevel::ALERT, fmt, ##__VA_ARGS__)
+#define CSK_LOG_CRITICAL(fmt, ...) CSK_LOG_IMPL(casket::LogLevel::CRITICAL, fmt, ##__VA_ARGS__)
+#define CSK_LOG_ERROR(fmt, ...) CSK_LOG_IMPL(casket::LogLevel::ERROR, fmt, ##__VA_ARGS__)
+#define CSK_LOG_WARNING(fmt, ...) CSK_LOG_IMPL(casket::LogLevel::WARNING, fmt, ##__VA_ARGS__)
+#define CSK_LOG_NOTICE(fmt, ...) CSK_LOG_IMPL(casket::LogLevel::NOTICE, fmt, ##__VA_ARGS__)
+#define CSK_LOG_INFO(fmt, ...) CSK_LOG_IMPL(casket::LogLevel::INFO, fmt, ##__VA_ARGS__)
+#define CSK_LOG_DEBUG(fmt, ...) CSK_LOG_IMPL(casket::LogLevel::DEBUG, fmt, ##__VA_ARGS__)
 #else
-#define LOG_EMERGENCY(fmt, ...)                                                                                        \
-    LOG_IMPL(casket::LogLevel::EMERGENCY "[%s:%d] " fmt, casket::log_detail::getFileName(__FILE__), __LINE__,          \
-             ##__VA_ARGS__)
-#define LOG_ALERT(fmt, ...)                                                                                            \
-    LOG_IMPL(casket::LogLevel::ALERT, "[%s:%d] " fmt, casket::log_detail::getFileName(__FILE__), __LINE__,             \
-             ##__VA_ARGS__)
-#define LOG_CRITICAL(fmt, ...)                                                                                         \
-    LOG_IMPL(casket::LogLevel::CRITICAL, "[%s:%d] " fmt, casket::log_detail::getFileName(__FILE__), __LINE__,          \
-             ##__VA_ARGS__)
-#define LOG_ERROR(fmt, ...)                                                                                            \
-    LOG_IMPL(casket::LogLevel::ERROR, "[%s:%d] " fmt, casket::log_detail::getFileName(__FILE__), __LINE__,             \
-             ##__VA_ARGS__)
-#define LOG_WARNING(fmt, ...)                                                                                          \
-    LOG_IMPL(casket::LogLevel::WARNING, "[%s:%d] " fmt, casket::log_detail::getFileName(__FILE__), __LINE__,           \
-             ##__VA_ARGS__)
-#define LOG_NOTICE(fmt, ...)                                                                                           \
-    LOG_IMPL(casket::LogLevel::NOTICE, "[%s:%d] " fmt, casket::log_detail::getFileName(__FILE__), __LINE__,            \
-             ##__VA_ARGS__)
-#define LOG_INFO(fmt, ...)                                                                                             \
-    LOG_IMPL(casket::LogLevel::INFO, "[%s:%d] " fmt, casket::log_detail::getFileName(__FILE__), __LINE__, ##__VA_ARGS__)
-#define LOG_DEBUG(fmt, ...)                                                                                            \
-    LOG_IMPL(casket::LogLevel::DEBUG, "[%s:%d] " fmt, casket::log_detail::getFileName(__FILE__), __LINE__,             \
-             ##__VA_ARGS__)
+#define CSK_LOG_EMERGENCY(fmt, ...)                                                                                    \
+    CSK_LOG_IMPL(casket::LogLevel::EMERGENCY "[%s:%d] " fmt, casket::log_detail::getFileName(__FILE__), __LINE__,      \
+                 ##__VA_ARGS__)
+#define CSK_LOG_ALERT(fmt, ...)                                                                                        \
+    CSK_LOG_IMPL(casket::LogLevel::ALERT, "[%s:%d] " fmt, casket::log_detail::getFileName(__FILE__), __LINE__,         \
+                 ##__VA_ARGS__)
+#define CSK_LOG_CRITICAL(fmt, ...)                                                                                     \
+    CSK_LOG_IMPL(casket::LogLevel::CRITICAL, "[%s:%d] " fmt, casket::log_detail::getFileName(__FILE__), __LINE__,      \
+                 ##__VA_ARGS__)
+#define CSK_LOG_ERROR(fmt, ...)                                                                                        \
+    CSK_LOG_IMPL(casket::LogLevel::ERROR, "[%s:%d] " fmt, casket::log_detail::getFileName(__FILE__), __LINE__,         \
+                 ##__VA_ARGS__)
+#define CSK_LOG_WARNING(fmt, ...)                                                                                      \
+    CSK_LOG_IMPL(casket::LogLevel::WARNING, "[%s:%d] " fmt, casket::log_detail::getFileName(__FILE__), __LINE__,       \
+                 ##__VA_ARGS__)
+#define CSK_LOG_NOTICE(fmt, ...)                                                                                       \
+    CSK_LOG_IMPL(casket::LogLevel::NOTICE, "[%s:%d] " fmt, casket::log_detail::getFileName(__FILE__), __LINE__,        \
+                 ##__VA_ARGS__)
+#define CSK_LOG_INFO(fmt, ...)                                                                                         \
+    CSK_LOG_IMPL(casket::LogLevel::INFO, "[%s:%d] " fmt, casket::log_detail::getFileName(__FILE__), __LINE__,          \
+                 ##__VA_ARGS__)
+#define CSK_LOG_DEBUG(fmt, ...)                                                                                            \
+    CSK_LOG_IMPL(casket::LogLevel::DEBUG, "[%s:%d] " fmt, casket::log_detail::getFileName(__FILE__), __LINE__,         \
+                 ##__VA_ARGS__)
 #endif

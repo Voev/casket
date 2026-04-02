@@ -1,9 +1,7 @@
 #include <vector>
 #include <cstdlib>
 #include <string>
-#include <casket/log/async_logger.hpp>
-#include <casket/log/log_worker.hpp>
-#include <casket/log/console.hpp>
+#include <casket/log/log.hpp>
 
 using namespace casket;
 
@@ -16,7 +14,7 @@ int main(int argc, char* argv[])
         msgCount = std::stoi(argv[1]);
     }
 
-    LogWorker logWorker{new ConsoleSink(true)};
+    LogWorker logWorker(std::make_unique<ConsoleSink>());
 
     AsyncLogger::getInstance().setLevel(LogLevel::DEBUG);
 
@@ -28,7 +26,7 @@ int main(int argc, char* argv[])
             {
                 for (int j = 0; j < msgCount; ++j)
                 {
-                    LOG_DEBUG("Producer %d, Message %d", i, j);
+                    CSK_LOG_DEBUG("Producer %d, Message %d", i, j);
                 }
             });
     }
