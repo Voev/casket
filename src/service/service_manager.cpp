@@ -5,10 +5,10 @@
 namespace casket
 {
 
-void ServiceManager::setup_default_signals()
+void ServiceManager::setupSignals()
 {
     int signals[] = {SIGINT, SIGTERM};
-    signal_handler_.registerSignals(signals,
+    signalHandler_.registerSignals(signals,
                                     [this](int signum)
                                     {
                                         std::cout << "Received signal " << signum << ", shutting down gracefully..."
@@ -16,11 +16,11 @@ void ServiceManager::setup_default_signals()
                                         this->stop();
                                     });
 
-    signal_handler_.registerSignal(
+    signalHandler_.registerSignal(
         SIGHUP, [this](int signum)
         { std::cout << "Received SIGHUP " << signum << ", reloading configuration..." << std::endl; });
 
-    signal_handler_.registerSignal(SIGUSR1,
+    signalHandler_.registerSignal(SIGUSR1,
                                    [this](int signum)
                                    {
                                        std::cout << "Received SIGUSR1" << signum << ", printing statistics..."
@@ -40,7 +40,7 @@ void ServiceManager::setup_poll_fds(std::vector<pollfd>& fds)
     }
 
     // Signal fd
-    int signal_fd = signal_handler_.getDescriptor();
+    int signal_fd = signalHandler_.getDescriptor();
     if (signal_fd != -1)
     {
         fds.push_back({signal_fd, POLLIN, 0});
@@ -53,7 +53,7 @@ void ServiceManager::setup_poll_fds(std::vector<pollfd>& fds)
         if (conn && conn->fd != -1)
         {
             short events = POLLIN;
-            if (conn->pendingRequests > 0)
+            if (conn->pendingCommands > 0)
             {
                 events |= POLLOUT;
             }
@@ -75,7 +75,7 @@ void ServiceManager::process_events(const std::vector<pollfd>& fds)
         {
             if (pfd.revents & POLLIN)
             {
-                accept_connection();
+                acceptConnection();
             }
             if (pfd.revents & (POLLERR | POLLHUP | POLLNVAL))
             {
@@ -83,32 +83,28 @@ void ServiceManager::process_events(const std::vector<pollfd>& fds)
                 stop();
             }
         }
-        else if (pfd.fd == signal_handler_.getDescriptor())
+        else if (pfd.fd == signalHandler_.getDescriptor())
         {
             if (pfd.revents & POLLIN)
             {
-                signal_handler_.processSignals();
+                signalHandler_.processSignals();
             }
         }
         else
         {
             if (pfd.revents & POLLIN)
             {
-                handle_client_input(pfd.fd);
+                handleClientInput(pfd.fd);
             }
             if (pfd.revents & (POLLERR | POLLHUP | POLLNVAL))
             {
-                handle_client_error(pfd.fd);
-            }
-            if (pfd.revents & POLLOUT)
-            {
-                // Асинхронная отправка может быть реализована здесь
+                handleClientError(pfd.fd);
             }
         }
     }
 }
 
-void ServiceManager::accept_connection()
+void ServiceManager::acceptConnection()
 {
     if (stats_.active_connections.load(std::memory_order_acquire) >= MAX_CONNECTIONS_ * 0.95)
     {
@@ -163,7 +159,7 @@ Connection* ServiceManager::find_connection(int fd)
     return connections_.findObject([fd](const Connection& conn) { return conn.fd == fd; });
 }
 
-void ServiceManager::handle_client_input(int fd)
+void ServiceManager::handleClientInput(int fd)
 {
     Connection* conn = find_connection(fd);
     if (!conn)
@@ -180,9 +176,8 @@ void ServiceManager::handle_client_input(int fd)
         conn->readOffset = offset;
         conn->update_activity();
 
-        process_client_buffer(conn);
+        processClientBuffer(conn);
 
-        // Динамическое увеличение буфера при необходимости
         if (offset >= conn->readBuffer.size() - 256)
         {
             conn->readBuffer.resize(conn->readBuffer.size() * 2);
@@ -192,18 +187,17 @@ void ServiceManager::handle_client_input(int fd)
     if (bytes_read == 0)
     {
         // Connection closed by client
-        handle_client_error(fd);
+        handleClientError(fd);
     }
     else if (bytes_read == -1 && errno != EAGAIN && errno != EWOULDBLOCK)
     {
         std::cerr << "Read error on fd " << fd << ": " << strerror(errno) << std::endl;
-        handle_client_error(fd);
+        handleClientError(fd);
     }
 }
 
-void ServiceManager::handle_client_error(int fd)
+void ServiceManager::handleClientError(int fd)
 {
-    // Ищем и закрываем соединение
     for (size_t i = 0; i < connections_.capacity(); ++i)
     {
         connections_.withObject(i,
@@ -217,7 +211,7 @@ void ServiceManager::handle_client_error(int fd)
     }
 }
 
-void ServiceManager::process_client_buffer(Connection* conn)
+void ServiceManager::processClientBuffer(Connection* conn)
 {
     size_t offset = conn->readOffset;
     uint8_t* data = conn->readBuffer.data();
@@ -231,35 +225,35 @@ void ServiceManager::process_client_buffer(Connection* conn)
         if (message_length > 10 * 1024 * 1024)
         {
             std::cerr << "Message too large: " << message_length << " bytes" << std::endl;
-            handle_client_error(conn->fd);
+            handleClientError(conn->fd);
             return;
         }
 
         if (offset >= sizeof(uint32_t) + message_length)
         {
-            // Создаем BinaryRequest безопасным способом
-            BinaryRequest request_data;
-            request_data.reserve(message_length);
+            // Создаем BinaryCommand безопасным способом
+            std::vector<uint8_t> requestData;
+            requestData.reserve(message_length);
 
             // Копируем данные вручную
             const uint8_t* message_start = data + sizeof(uint32_t);
             for (size_t i = 0; i < message_length; ++i)
             {
-                request_data.push_back(message_start[i]);
+                requestData.push_back(message_start[i]);
             }
 
-            auto [req_index, req] = requests_.acquireSlot(
-                [&](Request& req)
+            auto [req_index, req] = commands_.acquireSlot(
+                [&](Command& req)
                 {
-                    req.client_fd = conn->fd;
-                    req.request_data = std::move(request_data);
+                    req.clientFd = conn->fd;
+                    req.requestData = std::move(requestData);
                 });
 
             if (req)
             {
                 requestQueue_.push(req_index);
 
-                conn->pendingRequests++;
+                conn->pendingCommands++;
                 stats_.pending_requests.fetch_add(1, std::memory_order_relaxed);
 
                 // Сдвигаем буфер
@@ -270,7 +264,7 @@ void ServiceManager::process_client_buffer(Connection* conn)
         }
         else
         {
-            break; // Ждем остальные данные
+            break;
         }
     }
 
@@ -306,27 +300,27 @@ void ServiceManager::worker_loop()
 
         size_t req_index = req_index_opt.value();
 
-        if (req_index < requests_.capacity())
+        if (req_index < commands_.capacity())
         {
-            Request* req = requests_.getObject(req_index);
-            if (req)
+            Command* cmd = commands_.getObject(req_index);
+            if (cmd)
             {
-                process_single_request(req);
+                processCommand(cmd);
 
                 // Отправляем ответ
-                if (req->client_fd != -1)
+                if (cmd->clientFd != -1)
                 {
-                    send_response(req->client_fd, req->response_data);
+                    send_response(cmd->clientFd, cmd->responseData);
 
                     // Уменьшаем счетчик pending requests для соединения
-                    Connection* conn = find_connection(req->client_fd);
+                    Connection* conn = find_connection(cmd->clientFd);
                     if (conn)
                     {
-                        conn->pendingRequests--;
+                        conn->pendingCommands--;
                     }
                 }
 
-                requests_.releaseSlot(req_index);
+                commands_.releaseSlot(req_index);
             }
         }
 
@@ -356,7 +350,7 @@ void ServiceManager::check_connection_timeouts()
     {
         if (conn && conn->is_timed_out())
         {
-            if (conn->pendingRequests == 0)
+            if (conn->pendingCommands == 0)
             {
                 std::cout << "Closing timed out connection fd=" << conn->fd << std::endl;
                 // Находим индекс и освобождаем
@@ -401,23 +395,23 @@ void ServiceManager::check_request_timeouts()
         bool timed_out = false;
         int client_fd = -1;
         
-        requests_.withObject(req_index,
-                             [&](Request& req)
+        commands_.withObject(req_index,
+                             [&](Command& cmd)
                              {
-                                 timed_out = req.is_timed_out();
-                                 client_fd = req.client_fd;
+                                 timed_out = cmd.isTimedOut();
+                                 client_fd = cmd.clientFd;
                              });
         
         if (timed_out)
         {
-            std::cerr << "Request timeout for fd=" << client_fd << std::endl;
+            std::cerr << "Command timeout for fd=" << client_fd << std::endl;
 
             if (Connection* conn = find_connection(client_fd))
             {
-                conn->pendingRequests--;
+                conn->pendingCommands--;
             }
 
-            requests_.releaseSlot(req_index);
+            commands_.releaseSlot(req_index);
             stats_.request_timeouts.fetch_add(1, std::memory_order_relaxed);
             timed_out_count++;
         }
@@ -445,25 +439,25 @@ void ServiceManager::check_request_timeouts()
     }
 }
 
-void ServiceManager::process_single_request(Request* req)
+void ServiceManager::processCommand(Command* cmd)
 {
-    if (req->request_data.empty())
+    if (cmd->requestData.empty())
     {
-        req->response_data = StringToBinary("ERROR: Empty request");
+        cmd->responseData = StringToBinary("ERROR: Empty request");
         return;
     }
 
-    uint8_t command_length = req->request_data[0];
-    if (req->request_data.size() < command_length + 1U)
+    uint8_t command_length = cmd->requestData[0];
+    if (cmd->requestData.size() < command_length + 1U)
     {
-        req->response_data = StringToBinary("ERROR: Invalid request format");
+        cmd->responseData = StringToBinary("ERROR: Invalid request format");
         return;
     }
 
-    std::string command(req->request_data.begin() + 1, req->request_data.begin() + 1 + command_length);
-    BinaryRequest params(req->request_data.begin() + 1 + command_length, req->request_data.end());
+    std::string command(cmd->requestData.begin() + 1, cmd->requestData.begin() + 1 + command_length);
+    std::vector<uint8_t> params(cmd->requestData.begin() + 1 + command_length, cmd->requestData.end());
 
-    BinaryHandler handler;
+    Handler handler;
     {
         std::lock_guard lock(handlers_mutex_);
         auto it = handlers_.find(command);
@@ -477,20 +471,20 @@ void ServiceManager::process_single_request(Request* req)
     {
         try
         {
-            handler(params, req->response_data);
+            handler(params, cmd->responseData);
         }
         catch (const std::exception& e)
         {
-            req->response_data = StringToBinary("ERROR: " + std::string(e.what()));
+            cmd->responseData = StringToBinary("ERROR: " + std::string(e.what()));
         }
     }
     else
     {
-        req->response_data = StringToBinary("ERROR: Unknown command: " + command);
+        cmd->responseData = StringToBinary("ERROR: Unknown command: " + command);
     }
 }
 
-bool ServiceManager::send_response(int client_fd, const BinaryResponse& response)
+bool ServiceManager::send_response(int client_fd, const std::vector<uint8_t>& response)
 {
     Connection* conn = find_connection(client_fd);
     if (!conn || !conn->active)
@@ -521,7 +515,7 @@ bool ServiceManager::send_response(int client_fd, const BinaryResponse& response
             }
             else
             {
-                handle_client_error(client_fd);
+                handleClientError(client_fd);
                 return false;
             }
         }
@@ -550,7 +544,7 @@ void ServiceManager::close_all_connections()
         {
             break;
         }
-        requests_.releaseSlot(req_index_opt.value());
+        commands_.releaseSlot(req_index_opt.value());
     }
     stats_.pending_requests.store(0, std::memory_order_release);
 }

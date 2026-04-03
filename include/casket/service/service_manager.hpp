@@ -37,7 +37,7 @@ struct Connection
     int fd = -1;
     bool active = false;
     std::vector<uint8_t> readBuffer;
-    size_t pendingRequests = 0;
+    size_t pendingCommands = 0;
     size_t readOffset = 0;
     std::chrono::steady_clock::time_point lastActivity;
 
@@ -56,7 +56,7 @@ struct Connection
             fd = -1;
         }
         active = false;
-        pendingRequests = 0;
+        pendingCommands = 0;
         readOffset = 0;
         lastActivity = std::chrono::steady_clock::now();
         std::fill(readBuffer.begin(), readBuffer.end(), 0);
@@ -126,31 +126,30 @@ struct Connection
     }
 };
 
-struct Request
+struct Command
 {
-    int client_fd = -1;
-    BinaryRequest request_data;
-    BinaryResponse response_data;
-    std::chrono::steady_clock::time_point created_time;
+    int clientFd = -1;
+    std::vector<uint8_t> requestData;
+    std::vector<uint8_t> responseData;
+    std::chrono::steady_clock::time_point createdTime;
 
     void reset()
     {
-        client_fd = -1;
-        request_data.clear();
-        response_data.clear();
-        created_time = std::chrono::steady_clock::now();
+        clientFd = -1;
+        requestData.clear();
+        responseData.clear();
+        createdTime = std::chrono::steady_clock::now();
     }
 
-    bool is_timed_out() const
+    bool isTimedOut() const
     {
-        return std::chrono::steady_clock::now() - created_time > std::chrono::seconds(10);
+        return std::chrono::steady_clock::now() - createdTime > std::chrono::seconds(10);
     }
 };
 
 class ServiceManager
 {
 public:
-    using BinaryHandler = std::function<void(const BinaryRequest&, BinaryResponse&)>;
 
     ServiceManager(nonstd::string_view socket_path, size_t max_connections = 10000, size_t max_requests = 100000)
         : socket_path_(socket_path)
@@ -158,17 +157,17 @@ public:
         , MAX_REQUESTS_(max_requests)
         , running_(false)
         , connections_(max_connections)
-        , requests_(max_requests)
+        , commands_(max_requests)
     {
     }
 
     ~ServiceManager() noexcept
     {
         stop();
-        signal_handler_.stop();
+        signalHandler_.stop();
     }
 
-    void register_handler(nonstd::string_view command, BinaryHandler handler)
+    void register_handler(nonstd::string_view command, Handler handler)
     {
         std::lock_guard<std::mutex> lock(handlers_mutex_);
         handlers_.emplace(command, std::move(handler));
@@ -181,7 +180,7 @@ public:
             return false;
         }
 
-        setup_default_signals();
+        setupSignals();
 
         ::unlink(socket_path_.c_str());
 
@@ -279,7 +278,7 @@ public:
         clear_request_queue();
 
         // 9. Останавливаем обработчик сигналов
-        signal_handler_.stop();
+        signalHandler_.stop();
 
         // 10. Дополнительная очистка для гарантии отсутствия утечек
         cleanup_resources();
@@ -328,23 +327,22 @@ public:
         std::cout << "Pending requests: " << stats_.pending_requests.load() << "/" << MAX_REQUESTS_ << std::endl;
         std::cout << "Total processed: " << stats_.total_requests_processed.load() << std::endl;
         std::cout << "Connection timeouts: " << stats_.connection_timeouts.load() << std::endl;
-        std::cout << "Request timeouts: " << stats_.request_timeouts.load() << std::endl;
+        std::cout << "Command timeouts: " << stats_.request_timeouts.load() << std::endl;
     }
 
 private:
-    // Основные методы
-    void setup_default_signals();
+    void setupSignals();
     void setup_poll_fds(std::vector<pollfd>& fds);
     void process_events(const std::vector<pollfd>& fds);
-    void accept_connection();
-    void handle_client_input(int fd);
-    void handle_client_error(int fd);
-    void process_client_buffer(Connection* conn);
+    void acceptConnection();
+    void handleClientInput(int fd);
+    void handleClientError(int fd);
+    void processClientBuffer(Connection* conn);
 
     void worker_loop();
     void timeout_check_loop();
-    void process_single_request(Request* req);
-    bool send_response(int client_fd, const BinaryResponse& response);
+    void processCommand(Command* cmd);
+    bool send_response(int client_fd, const std::vector<uint8_t>& response);
     void close_all_connections();
 
     // Lock-free методы для управления пулами
@@ -364,9 +362,9 @@ private:
 
             size_t index = req_index_opt.value();
             // Пропускаем специальные индикаторы остановки
-            if (index < requests_.capacity())
+            if (index < commands_.capacity())
             {
-                requests_.releaseSlot(index);
+                commands_.releaseSlot(index);
                 cleared_count++;
             }
         }
@@ -379,27 +377,28 @@ private:
         }
     }
 
-       void cleanup_resources()
+    void cleanup_resources()
     {
         // Гарантируем, что все соединения закрыты
         for (size_t i = 0; i < connections_.capacity(); ++i)
         {
-            connections_.withObject(i, [](Connection& conn)
-            {
-                if (conn.fd != -1)
-                {
-                    ::close(conn.fd);
-                    conn.fd = -1;
-                    conn.active = false;
-                }
-            });
+            connections_.withObject(i,
+                                    [](Connection& conn)
+                                    {
+                                        if (conn.fd != -1)
+                                        {
+                                            ::close(conn.fd);
+                                            conn.fd = -1;
+                                            conn.active = false;
+                                        }
+                                    });
             connections_.releaseSlot(i);
         }
-        
+
         // Очищаем статистику
         stats_.active_connections.store(0, std::memory_order_release);
         stats_.pending_requests.store(0, std::memory_order_release);
-        
+
         // Сбрасываем флаги
         server_fd_ = -1;
     }
@@ -414,31 +413,15 @@ private:
     const size_t MAX_REQUESTS_;
     int server_fd_ = -1;
     std::atomic<bool> running_;
-
-    // Пул соединений
     LfObjectPool<Connection> connections_;
-
-    // Пул запросов
-    LfObjectPool<Request> requests_;
-
-    // Очередь запросов
+    LfObjectPool<Command> commands_;
     lock_free::Queue<size_t> requestQueue_;
-
-    // Обработчики сигналов
-    SignalHandler signal_handler_;
-
-    // Обработчики команд
+    SignalHandler signalHandler_;
     std::mutex handlers_mutex_;
-    std::unordered_map<std::string, BinaryHandler> handlers_;
-
-    // Потоки
+    std::unordered_map<std::string, Handler> handlers_;
     std::vector<std::thread> workers_;
     std::thread timeout_thread_;
-
-    // Синхронизация
     std::condition_variable timeout_cv_;
-
-    // Статистика
     Statistics stats_;
 };
 
