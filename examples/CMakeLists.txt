@@ -1,2 +1,3 @@
 add_subdirectory(signal_handler)
 add_subdirectory(log_manager)
+add_subdirectory(echo_server)
