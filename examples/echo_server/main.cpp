@@ -1,78 +1,68 @@
 #include <iostream>
-#include <thread>
 #include <chrono>
+#include <cstring>
 
 #include <casket/transport/unix_socket.hpp>
 #include <casket/server/generic_server.hpp>
 
 using namespace casket;
 
-class EchoServer
-{
-private:
-    GenericServer<UnixSocket> server_;
-
-public:
-    EchoServer()
-    {
-        server_.setConnectionHandler(
-            [](UnixSocket& client, const std::vector<uint8_t>& data)
-            {
-                std::string message(data.begin(), data.end());
-                std::cout << "Received: " << message << std::endl;
-
-                std::string response = "Echo: " + message;
-                client.send(reinterpret_cast<const uint8_t*>(response.c_str()), response.size());
-            });
-
-        server_.setErrorHandler([](const std::error_code& ec)
-                                { std::cerr << "Server error: " << ec.message() << std::endl; });
-    }
-
-    bool start(const std::string& address)
-    {
-        if (!server_.listen(address))
-        {
-            std::cerr << "Failed to listen on " << address << std::endl;
-            return false;
-        }
-
-        std::cout << "Echo server started on " << address << std::endl;
-        server_.start();
-        return true;
-    }
-
-    void stop()
-    {
-        server_.stop();
-        std::cout << "Server stopped" << std::endl;
-    }
-
-    bool isRunning() const
-    {
-        return server_.isRunning();
-    }
-
-    size_t getClientCount() const
-    {
-        return server_.getClientCount();
-    }
-};
-
 int main()
 {
-    EchoServer server;
-
-    if (!server.start("/tmp/echo_server"))
+    GenericServer<UnixSocket> server;
+    
+    server.setConnectionHandler(
+        [](ByteBuffer& request, ByteBuffer& response)
+        {
+            size_t readable = request.readable();
+            if (readable == 0) return;
+            
+            const char* prefix = "Echo: ";
+            response.write(reinterpret_cast<const uint8_t*>(prefix), std::strlen(prefix));
+            
+            while (readable > 0)
+            {
+                size_t avail;
+                uint8_t* data = request.peek(avail);
+                if (data && avail > 0)
+                {
+                    size_t toWrite = std::min(avail, readable);
+                    response.write(data, toWrite);
+                    request.skip(toWrite);
+                    readable -= toWrite;
+                }
+                else
+                {
+                    break;
+                }
+            }
+        });
+    
+    if (!server.listen("/tmp/echo_server"))
     {
+        std::cerr << "Failed to listen" << std::endl;
         return 1;
     }
+    
+    server.start();
+    std::cout << "Server running in main thread" << std::endl;
 
-    while (server.isRunning())
+    while (true)
     {
-        std::this_thread::sleep_for(std::chrono::seconds(5));
-        std::cout << "Active connections: " << server.getClientCount() << std::endl;
+        if (!server.step())
+        {
+            break;
+        }
+        
+        static auto lastLog = std::chrono::steady_clock::now();
+        auto now = std::chrono::steady_clock::now();
+        if (now - lastLog > std::chrono::seconds(5))
+        {
+            std::cout << "Active connections: " << server.getClientCount() << std::endl;
+            lastLog = now;
+        }
     }
 
-    return 0;
+    server.stop();
+    return EXIT_SUCCESS;
 }
