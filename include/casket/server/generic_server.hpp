@@ -14,6 +14,7 @@
 
 #include <casket/multiplexing/epoll_poller.hpp>
 #include <casket/types/byte_buffer.hpp>
+#include <casket/lock_free/lf_mpsc_queue.hpp>
 
 namespace casket
 {
@@ -28,6 +29,7 @@ public:
     struct Config
     {
         size_t bufferSize{8192};
+        size_t bufferPoolSize{1024};
         std::chrono::seconds idleTimeout{60};
         int maxEvents{64};
         int waitTimeoutMs{100};
@@ -35,6 +37,8 @@ public:
 
     explicit GenericServer(const Config& config = Config{})
         : config_(config)
+        , freeReadBuffers_(config_.bufferPoolSize)
+        , freeWriteBuffers_(config_.bufferPoolSize)
     {
     }
 
@@ -142,6 +146,14 @@ public:
 
         for (auto& [fd, client] : clients_)
         {
+            if (client->readBuffer)
+            {
+                releaseReadBuffer(std::move(client->readBuffer));
+            }
+            if (client->writeBuffer)
+            {
+                releaseWriteBuffer(std::move(client->writeBuffer));
+            }
             client->transport->close();
         }
         clients_.clear();
@@ -244,18 +256,17 @@ private:
             return;
         }
 
-        std::unique_ptr<ByteBuffer> readBuffer;
-        std::unique_ptr<ByteBuffer> writeBuffer;
+        auto readBuffer = acquireReadBuffer();
+        auto writeBuffer = acquireWriteBuffer();
 
-        /*if (bufferPool_) {
-            readBuffer = bufferPool_->acquire();
-            writeBuffer = bufferPool_->acquire();
-        }*/
-
-        if (!readBuffer)
-            readBuffer = std::make_unique<ByteBuffer>(config_.bufferSize);
-        if (!writeBuffer)
-            writeBuffer = std::make_unique<ByteBuffer>(config_.bufferSize);
+        if (!readBuffer || !writeBuffer)
+        {
+            if (errorHandler_)
+            {
+                errorHandler_(std::make_error_code(std::errc::not_enough_memory));
+            }
+            return;
+        }
 
         int clientFd = clientTransport->getFd();
         auto ctx =
@@ -271,6 +282,8 @@ private:
             {
                 errorHandler_(ec);
             }
+            releaseReadBuffer(std::move(ctx->readBuffer));
+            releaseWriteBuffer(std::move(ctx->writeBuffer));
             return;
         }
 
@@ -471,6 +484,16 @@ private:
                 std::error_code ec;
                 poller_->remove(fd, ec);
             }
+
+            if (it->second->readBuffer)
+            {
+                releaseReadBuffer(std::move(it->second->readBuffer));
+            }
+            if (it->second->writeBuffer)
+            {
+                releaseWriteBuffer(std::move(it->second->writeBuffer));
+            }
+
             clients_.erase(it);
         }
     }
@@ -488,6 +511,16 @@ private:
                     std::error_code ec;
                     poller_->remove(it->first, ec);
                 }
+
+                if (it->second->readBuffer)
+                {
+                    releaseReadBuffer(std::move(it->second->readBuffer));
+                }
+                if (it->second->writeBuffer)
+                {
+                    releaseWriteBuffer(std::move(it->second->writeBuffer));
+                }
+
                 it = clients_.erase(it);
             }
             else
@@ -520,6 +553,46 @@ private:
         }
     }
 
+    std::unique_ptr<ByteBuffer> acquireReadBuffer()
+    {
+        std::unique_ptr<ByteBuffer> buffer;
+        if (freeReadBuffers_.pop(buffer))
+        {
+            buffer->reset();
+            return buffer;
+        }
+        return std::make_unique<ByteBuffer>(config_.bufferSize);
+    }
+
+    void releaseReadBuffer(std::unique_ptr<ByteBuffer> buffer)
+    {
+        if (buffer)
+        {
+            buffer->reset();
+            freeReadBuffers_.push(std::move(buffer));
+        }
+    }
+
+    std::unique_ptr<ByteBuffer> acquireWriteBuffer()
+    {
+        std::unique_ptr<ByteBuffer> buffer;
+        if (freeWriteBuffers_.pop(buffer))
+        {
+            buffer->reset();
+            return buffer;
+        }
+        return std::make_unique<ByteBuffer>(config_.bufferSize);
+    }
+
+    void releaseWriteBuffer(std::unique_ptr<ByteBuffer> buffer)
+    {
+        if (buffer)
+        {
+            buffer->reset();
+            freeWriteBuffers_.push(std::move(buffer));
+        }
+    }
+
 private:
     Config config_;
     Transport listenTransport_;
@@ -528,6 +601,10 @@ private:
 
     std::unique_ptr<EpollPoller> poller_;
     std::vector<PollEvent> events_;
+
+    MPSCQueue<std::unique_ptr<ByteBuffer>> freeReadBuffers_;
+    MPSCQueue<std::unique_ptr<ByteBuffer>> freeWriteBuffers_;
+
     std::atomic<bool> running_{false};
     bool initialized_{false};
     std::thread serverThread_;
