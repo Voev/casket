@@ -9,6 +9,9 @@
 #include <vector>
 
 #include <casket/transport/transport_base.hpp>
+#include <casket/transport/unix_socket.hpp>
+#include <casket/transport/tcp_socket.hpp>
+
 #include <casket/multiplexing/epoll_poller.hpp>
 #include <casket/types/byte_buffer.hpp>
 
@@ -40,16 +43,16 @@ public:
         stop();
     }
 
-    bool listen(const std::string& address)
+    bool listen(const std::string& address, int port = 0)
     {
         if constexpr (std::is_same_v<Transport, UnixSocket>)
         {
             return listenTransport_.listen(address);
         }
-        /*else if constexpr (std::is_same_v<Transport, TcpSocket>)
+        else if constexpr (std::is_same_v<Transport, TcpSocket>)
         {
-            return listenTransport_.listen(address);
-        }*/
+            return listenTransport_.listen(port, address);
+        }
         return false;
     }
 
