@@ -7,6 +7,9 @@
 #include <atomic>
 #include <mutex>
 #include <vector>
+#include <iostream>
+#include <iomanip>
+#include <sstream>
 
 #include <casket/transport/transport_base.hpp>
 #include <casket/transport/unix_socket.hpp>
@@ -14,10 +17,138 @@
 
 #include <casket/multiplexing/epoll_poller.hpp>
 #include <casket/types/byte_buffer.hpp>
-#include <casket/lock_free/lf_mpsc_queue.hpp>
+#include <casket/types/pooled_queue.hpp>
 
 namespace casket
 {
+
+struct ServerStatistics
+{
+    std::atomic<uint64_t> totalConnections{0};
+    std::atomic<uint64_t> activeConnections{0};
+    std::atomic<uint64_t> totalDisconnections{0};
+    std::atomic<uint64_t> totalBytesReceived{0};
+    std::atomic<uint64_t> totalBytesSent{0};
+    std::atomic<uint64_t> totalMessagesProcessed{0};
+    std::atomic<uint64_t> totalErrors{0};
+    std::atomic<uint64_t> peakConnections{0};
+    std::chrono::steady_clock::time_point startTime;
+
+    void reset()
+    {
+        totalConnections = 0;
+        activeConnections = 0;
+        totalDisconnections = 0;
+        totalBytesReceived = 0;
+        totalBytesSent = 0;
+        totalMessagesProcessed = 0;
+        totalErrors = 0;
+        peakConnections = 0;
+        startTime = std::chrono::steady_clock::now();
+    }
+
+    void recordConnection()
+    {
+        uint64_t current = ++activeConnections;
+        ++totalConnections;
+
+        uint64_t peak = peakConnections.load();
+        while (current > peak && !peakConnections.compare_exchange_weak(peak, current))
+            ;
+    }
+
+    void recordDisconnection()
+    {
+        --activeConnections;
+        ++totalDisconnections;
+    }
+
+    void recordBytesReceived(size_t bytes)
+    {
+        totalBytesReceived += bytes;
+    }
+
+    void recordBytesSent(size_t bytes)
+    {
+        totalBytesSent += bytes;
+    }
+
+    void recordMessage()
+    {
+        ++totalMessagesProcessed;
+    }
+
+    void recordError()
+    {
+        ++totalErrors;
+    }
+
+    double getUptimeSeconds() const
+    {
+        auto now = std::chrono::steady_clock::now();
+        return std::chrono::duration_cast<std::chrono::duration<double>>(now - startTime).count();
+    }
+
+    double getAverageMessageSize() const
+    {
+        uint64_t messages = totalMessagesProcessed.load();
+        if (messages == 0)
+            return 0.0;
+        return static_cast<double>(totalBytesReceived.load() + totalBytesSent.load()) / messages;
+    }
+
+    void print(std::ostream& os = std::cout) const
+    {
+        double uptime = getUptimeSeconds();
+        uint64_t received = totalBytesReceived.load();
+        uint64_t sent = totalBytesSent.load();
+        uint64_t messages = totalMessagesProcessed.load();
+
+        os << "\n=== Server Statistics ===\n"
+           << "Uptime: " << std::fixed << std::setprecision(2) << uptime << " seconds\n"
+           << "Total connections: " << totalConnections.load() << "\n"
+           << "Active connections: " << activeConnections.load() << "\n"
+           << "Peak connections: " << peakConnections.load() << "\n"
+           << "Total disconnections: " << totalDisconnections.load() << "\n"
+           << "Total messages processed: " << messages << "\n"
+           << "Total bytes received: " << received << " (" << std::fixed << std::setprecision(2)
+           << received / (1024.0 * 1024.0) << " MB)\n"
+           << "Total bytes sent: " << sent << " (" << sent / (1024.0 * 1024.0) << " MB)\n"
+           << "Total errors: " << totalErrors.load() << "\n"
+           << "\nPerformance metrics:\n"
+           << "  Messages/sec: " << std::setprecision(0) << (uptime > 0 ? messages / uptime : 0) << " msg/s\n"
+           << "  Throughput (recv): " << std::setprecision(2) << (uptime > 0 ? received / (uptime * 1024 * 1024) : 0)
+           << " MB/s\n"
+           << "  Throughput (send): " << std::setprecision(2) << (uptime > 0 ? sent / (uptime * 1024 * 1024) : 0)
+           << " MB/s\n"
+           << "  Average message size: " << std::setprecision(0) << getAverageMessageSize() << " bytes\n";
+    }
+
+    void printCSV(std::ostream& os = std::cout) const
+    {
+        double uptime = getUptimeSeconds();
+        os << uptime << "," << totalConnections.load() << "," << activeConnections.load() << ","
+           << peakConnections.load() << "," << totalDisconnections.load() << "," << totalMessagesProcessed.load() << ","
+           << totalBytesReceived.load() << "," << totalBytesSent.load() << "," << totalErrors.load() << ","
+           << (uptime > 0 ? totalMessagesProcessed.load() / uptime : 0) << ","
+           << (uptime > 0 ? totalBytesReceived.load() / (uptime * 1024 * 1024) : 0);
+    }
+
+    static void printCSVHeader(std::ostream& os = std::cout)
+    {
+        os << "uptime_seconds,"
+           << "total_connections,"
+           << "active_connections,"
+           << "peak_connections,"
+           << "total_disconnections,"
+           << "total_messages,"
+           << "total_bytes_recv,"
+           << "total_bytes_sent,"
+           << "total_errors,"
+           << "messages_per_sec,"
+           << "throughput_mb_per_sec\n";
+    }
+};
 
 template <typename Transport>
 class GenericServer
@@ -25,6 +156,7 @@ class GenericServer
 public:
     using ConnectionHandler = std::function<void(ByteBuffer&, ByteBuffer&)>;
     using ErrorHandler = std::function<void(const std::error_code&)>;
+    using StatisticsHandler = std::function<void(const ServerStatistics&)>;
 
     struct Config
     {
@@ -33,6 +165,8 @@ public:
         std::chrono::seconds idleTimeout{60};
         int maxEvents{64};
         int waitTimeoutMs{100};
+        bool enableStatistics{true};
+        std::chrono::seconds statisticsPrintInterval{5};
     };
 
     explicit GenericServer(const Config& config = Config{})
@@ -40,6 +174,10 @@ public:
         , freeReadBuffers_(config_.bufferPoolSize)
         , freeWriteBuffers_(config_.bufferPoolSize)
     {
+        if (config_.enableStatistics)
+        {
+            statistics_.reset();
+        }
     }
 
     ~GenericServer()
@@ -70,6 +208,30 @@ public:
         errorHandler_ = std::move(handler);
     }
 
+    void setStatisticsHandler(StatisticsHandler handler)
+    {
+        statisticsHandler_ = std::move(handler);
+    }
+
+    const ServerStatistics& getStatistics() const
+    {
+        return statistics_;
+    }
+
+    void enableStatistics(bool enable)
+    {
+        config_.enableStatistics = enable;
+        if (enable && statistics_.startTime.time_since_epoch().count() == 0)
+        {
+            statistics_.reset();
+        }
+    }
+
+    void printStatistics(std::ostream& os = std::cout) const
+    {
+        statistics_.print(os);
+    }
+
     void start()
     {
         if (!init())
@@ -77,6 +239,27 @@ public:
             return;
         }
         running_ = true;
+
+        if (config_.enableStatistics)
+        {
+            statisticsThread_ = std::thread(
+                [this]()
+                {
+                    while (running_)
+                    {
+                        std::this_thread::sleep_for(config_.statisticsPrintInterval);
+                        if (running_ && statisticsHandler_)
+                        {
+                            statisticsHandler_(statistics_);
+                        }
+                        else if (running_ && config_.enableStatistics)
+                        {
+                            std::lock_guard<std::mutex> lock(statisticsMutex_);
+                            statistics_.print(std::cout);
+                        }
+                    }
+                });
+        }
     }
 
     bool step()
@@ -94,6 +277,10 @@ public:
             if (errorHandler_)
             {
                 errorHandler_(ec);
+            }
+            if (config_.enableStatistics)
+            {
+                statistics_.recordError();
             }
             return running_;
         }
@@ -138,6 +325,11 @@ public:
     {
         running_ = false;
 
+        if (statisticsThread_.joinable())
+        {
+            statisticsThread_.join();
+        }
+
         if (poller_)
         {
             poller_->destroy();
@@ -180,6 +372,10 @@ private:
         std::unique_ptr<ByteBuffer> writeBuffer;
         std::chrono::steady_clock::time_point lastActivity;
         bool isWriting;
+
+        uint64_t bytesReceived{0};
+        uint64_t bytesSent{0};
+        uint64_t messagesProcessed{0};
 
         ClientContext(std::unique_ptr<Transport> t, std::unique_ptr<ByteBuffer> readBuf,
                       std::unique_ptr<ByteBuffer> writeBuf)
@@ -253,6 +449,10 @@ private:
             {
                 errorHandler_(clientTransport->lastError());
             }
+            if (config_.enableStatistics)
+            {
+                statistics_.recordError();
+            }
             return;
         }
 
@@ -265,6 +465,10 @@ private:
             {
                 errorHandler_(std::make_error_code(std::errc::not_enough_memory));
             }
+            if (config_.enableStatistics)
+            {
+                statistics_.recordError();
+            }
             return;
         }
 
@@ -273,7 +477,7 @@ private:
             std::make_unique<ClientContext>(std::move(clientTransport), std::move(readBuffer), std::move(writeBuffer));
 
         std::error_code ec;
-        EventType events = EventType::Readable | EventType::HangUp;
+        EventType events = EventType::Readable | EventType::HangUp | EventType::EdgeTriggered;
         poller_->add(static_cast<void*>(ctx.get()), clientFd, events, ec);
 
         if (ec)
@@ -282,12 +486,21 @@ private:
             {
                 errorHandler_(ec);
             }
+            if (config_.enableStatistics)
+            {
+                statistics_.recordError();
+            }
             releaseReadBuffer(std::move(ctx->readBuffer));
             releaseWriteBuffer(std::move(ctx->writeBuffer));
             return;
         }
 
         clients_[clientFd] = std::move(ctx);
+
+        if (config_.enableStatistics)
+        {
+            statistics_.recordConnection();
+        }
     }
 
     void handleClientEvents(ClientContext* ctx, EventType revents)
@@ -324,16 +537,28 @@ private:
         while (ctx->readBuffer->readable() > 0)
         {
             size_t oldReadPos = ctx->readBuffer->readPos();
+            size_t oldWritePos = ctx->writeBuffer->writePos();
 
-            ByteBuffer& request = *ctx->readBuffer;
-            ByteBuffer& response = *ctx->writeBuffer;
-
-            connectionHandler_(request, response);
+            connectionHandler_(*ctx->readBuffer, *ctx->writeBuffer);
 
             /// If the handler hasn't read anything, we exit.
             if (ctx->readBuffer->readPos() == oldReadPos)
             {
                 break;
+            }
+
+            if (config_.enableStatistics)
+            {
+                size_t bytesRead = ctx->readBuffer->readPos() - oldReadPos;
+                size_t bytesWritten = ctx->writeBuffer->writePos() - oldWritePos;
+
+                ctx->bytesReceived += bytesRead;
+                ctx->bytesSent += bytesWritten;
+                ctx->messagesProcessed++;
+
+                statistics_.recordBytesReceived(bytesRead);
+                statistics_.recordBytesSent(bytesWritten);
+                statistics_.recordMessage();
             }
 
             /// Senging a reply.
@@ -347,9 +572,9 @@ private:
     void handleClientRead(ClientContext* ctx)
     {
         if (!ctx->readBuffer)
-        {
             return;
-        }
+
+        const int MAX_RETRY_ATTEMPTS = 3;
 
         while (true)
         {
@@ -359,10 +584,43 @@ private:
             if (available == 0)
             {
                 /// Buffer is full, we must process data.
-                processClientData(ctx);
-                buffer = ctx->readBuffer->prepareWrite(available);
-                if (available == 0)
-                    break;
+                int retryCount = 0;
+                bool spaceFreed = false;
+
+                while (retryCount < MAX_RETRY_ATTEMPTS && !spaceFreed)
+                {
+                    processClientData(ctx);
+
+                    if (ctx->writeBuffer->readable() > 0)
+                    {
+                        flushWriteBuffer(ctx);
+                    }
+
+                    buffer = ctx->readBuffer->prepareWrite(available);
+                    if (available > 0)
+                    {
+                        spaceFreed = true;
+                        break;
+                    }
+
+                    retryCount++;
+
+                    if (retryCount < MAX_RETRY_ATTEMPTS)
+                    {
+                        std::this_thread::yield();
+                    }
+                }
+
+                if (!spaceFreed)
+                {
+                    if (errorHandler_)
+                    {
+                        errorHandler_(std::make_error_code(std::errc::no_buffer_space));
+                    }
+
+                    removeClient(ctx->getFd());
+                    return;
+                }
             }
 
             ssize_t received = ctx->transport->recv(buffer, available);
@@ -426,6 +684,10 @@ private:
                 }
                 else
                 {
+                    if (config_.enableStatistics)
+                    {
+                        statistics_.recordError();
+                    }
                     removeClient(ctx->getFd());
                     return;
                 }
@@ -495,6 +757,11 @@ private:
             }
 
             clients_.erase(it);
+
+            if (config_.enableStatistics)
+            {
+                statistics_.recordDisconnection();
+            }
         }
     }
 
@@ -522,6 +789,11 @@ private:
                 }
 
                 it = clients_.erase(it);
+
+                if (config_.enableStatistics)
+                {
+                    statistics_.recordDisconnection();
+                }
             }
             else
             {
@@ -598,18 +870,44 @@ private:
     Transport listenTransport_;
     ConnectionHandler connectionHandler_;
     ErrorHandler errorHandler_;
+    StatisticsHandler statisticsHandler_;
 
     std::unique_ptr<EpollPoller> poller_;
     std::vector<PollEvent> events_;
 
-    MPSCQueue<std::unique_ptr<ByteBuffer>> freeReadBuffers_;
-    MPSCQueue<std::unique_ptr<ByteBuffer>> freeWriteBuffers_;
+    StrictPooledQueue<std::unique_ptr<ByteBuffer>> freeReadBuffers_;
+    StrictPooledQueue<std::unique_ptr<ByteBuffer>> freeWriteBuffers_;
 
     std::atomic<bool> running_{false};
     bool initialized_{false};
-    std::thread serverThread_;
 
     std::unordered_map<int, std::unique_ptr<ClientContext>> clients_;
+
+    ServerStatistics statistics_;
+    std::thread statisticsThread_;
+    mutable std::mutex statisticsMutex_;
 };
+
+template <typename Transport>
+void printServerStats(const GenericServer<Transport>& server, std::ostream& os = std::cout)
+{
+    server.printStatistics(os);
+}
+
+template <typename Transport>
+void enablePeriodicStats(GenericServer<Transport>& server, std::chrono::seconds interval, std::ostream& os = std::cout)
+{
+    server.setStatisticsHandler(
+        [interval, &os](const ServerStatistics& stats)
+        {
+            static auto lastPrint = std::chrono::steady_clock::now();
+            auto now = std::chrono::steady_clock::now();
+            if (now - lastPrint >= interval)
+            {
+                stats.print(os);
+                lastPrint = now;
+            }
+        });
+}
 
 } // namespace casket

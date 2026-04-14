@@ -4,65 +4,64 @@
 
 #include <casket/transport/unix_socket.hpp>
 #include <casket/server/generic_server.hpp>
+#include <casket/signal/signal_handler.hpp>
 
 using namespace casket;
 
 int main()
 {
     GenericServer<UnixSocket> server;
-    
+    SignalHandler signalHandler;
+    std::atomic_bool interrupted{false};
+
     server.setConnectionHandler(
         [](ByteBuffer& request, ByteBuffer& response)
         {
-            size_t readable = request.readable();
-            if (readable == 0) return;
-            
-            const char* prefix = "Echo: ";
-            response.write(reinterpret_cast<const uint8_t*>(prefix), std::strlen(prefix));
-            
-            while (readable > 0)
-            {
-                size_t avail;
-                uint8_t* data = request.peek(avail);
-                if (data && avail > 0)
-                {
-                    size_t toWrite = std::min(avail, readable);
-                    response.write(data, toWrite);
-                    request.skip(toWrite);
-                    readable -= toWrite;
-                }
-                else
-                {
-                    break;
-                }
-            }
+            size_t requestSize = request.readable();
+            size_t responseSize = response.write(request.data() + request.readPos(), requestSize);
+            request.consume(requestSize);
+
+            std::cout << "Processed " << 1 << " messages, "
+                          << "request size: " << requestSize << ", response size: " << responseSize << std::endl;
         });
-    
+
+    int signals[] = {SIGINT, SIGTERM};
+
+    signalHandler.registerSignals(signals,
+                                  [&interrupted](int signum)
+                                  {
+                                      std::cout << "\nReceived signal " << signum << " (SIGINT), shutting down..."
+                                                << std::endl;
+                                      interrupted = true;
+                                  });
+
     if (!server.listen("/tmp/echo_server"))
     {
         std::cerr << "Failed to listen" << std::endl;
         return 1;
     }
-    
+
     server.start();
     std::cout << "Server running in main thread" << std::endl;
 
-    while (true)
+    std::error_code ec{};
+    while (!interrupted)
     {
         if (!server.step())
         {
             break;
         }
-        
-        static auto lastLog = std::chrono::steady_clock::now();
-        auto now = std::chrono::steady_clock::now();
-        if (now - lastLog > std::chrono::seconds(5))
+
+        signalHandler.processSignals(ec);
+        if (ec)
         {
-            std::cout << "Active connections: " << server.getClientCount() << std::endl;
-            lastLog = now;
+            std::cerr << "Error processing signals: " << ec.message() << std::endl;
         }
+
+        enablePeriodicStats(server, std::chrono::seconds(3), std::cout);
     }
 
     server.stop();
+    std::cout << "Server stopped" << std::endl;
     return EXIT_SUCCESS;
 }

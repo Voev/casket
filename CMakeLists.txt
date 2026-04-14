@@ -39,3 +39,6 @@ endif (ENABLE_UNIT_TESTS)
 
 # Examples
 add_subdirectory(examples)
+
+# Benchmarks
+add_subdirectory(bench)
