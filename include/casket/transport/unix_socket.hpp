@@ -189,6 +189,11 @@ public:
         }
     }
 
+    bool isValid() const
+    {
+        return fd_ != -1;
+    }
+
 private:
     inline int createSocket() noexcept
     {
