@@ -408,7 +408,7 @@ private:
     {
         auto clientTransport = std::make_unique<Transport>(listenTransport_.accept());
 
-        if (!clientTransport->isConnected())
+        if (!clientTransport->isValid())
         {
             if (errorHandler_)
             {

@@ -34,9 +34,9 @@ public:
         return derived().recvmsgImpl(msg, flags);
     }
 
-    bool isConnected() const
+    bool isValid() const
     {
-        return derived().isConnectedImpl();
+        return derived().isValidImpl();
     }
 
     const std::error_code& lastError() const

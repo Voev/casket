@@ -33,6 +33,7 @@ public:
         , ec_(std::move(other.ec_))
         , fd_(std::exchange(other.fd_, -1))
         , connected_(std::exchange(other.connected_, false))
+        , isServer_(std::exchange(other.isServer_, false))
     {
     }
 
@@ -46,6 +47,7 @@ public:
             ec_ = std::move(other.ec_);
             fd_ = std::exchange(other.fd_, -1);
             connected_ = std::exchange(other.connected_, false);
+            isServer_ = std::exchange(other.isServer_, false);
         }
         return *this;
     }
@@ -80,6 +82,7 @@ public:
     bool listen(const std::string& path)
     {
         path_ = path;
+        isServer_ = true;
 
         fd_ = createSocket();
         if (fd_ < 0)
@@ -132,14 +135,10 @@ public:
         UnixSocket client;
         client.fd_ = clientFd;
         client.connected_ = true;
+        client.isServer_ = false;
         client.ec_.clear();
 
         return client;
-    }
-
-    bool isValid() const
-    {
-        return fd_ != -1;
     }
 
 private:
@@ -253,9 +252,9 @@ private:
         return n;
     }
 
-    bool isConnectedImpl() const
+    bool isValidImpl() const
     {
-        return (connected_ && fd_ >= 0);
+        return (fd_ != -1);
     }
 
     int getFdImpl() const
@@ -279,7 +278,7 @@ private:
         connected_ = false;
         ec_.clear();
 
-        if (!path_.empty())
+        if (isServer_ && !path_.empty())
         {
             ::unlink(path_.c_str());
             path_.clear();
@@ -303,6 +302,7 @@ private:
     std::error_code ec_;
     int fd_{-1};
     bool connected_{false};
+    bool isServer_{false};
 };
 
 } // namespace casket

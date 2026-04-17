@@ -265,9 +265,9 @@ private:
         return n;
     }
 
-    bool isConnectedImpl() const
+    bool isValidImpl() const
     {
-        return (connected_ && fd_ >= 0);
+        return (fd_ != -1);
     }
 
     int getFdImpl() const
