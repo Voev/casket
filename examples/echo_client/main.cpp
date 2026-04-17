@@ -33,6 +33,8 @@ int main()
     uint8_t buffer[4096];
     ssize_t received = client.recv(buffer, sizeof(buffer));
 
+    client.close();
+
     if (received > 0)
     {
         std::cout << "Received: " << received << " bytes" << std::endl;

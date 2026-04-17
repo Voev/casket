@@ -3,6 +3,9 @@
 #include <cerrno>
 #include <cstdint>
 #include <system_error>
+#include <sys/uio.h>
+
+#include <iostream>
 
 namespace casket
 {
@@ -19,6 +22,16 @@ public:
     ssize_t recv(uint8_t* buffer, size_t length)
     {
         return derived().recvImpl(buffer, length);
+    }
+
+    ssize_t sendmsg(const struct msghdr* msg, int flags = 0)
+    {
+        return derived().sendmsgImpl(msg, flags);
+    }
+
+    ssize_t recvmsg(struct msghdr* msg, int flags = 0)
+    {
+        return derived().recvmsgImpl(msg, flags);
     }
 
     bool isConnected() const

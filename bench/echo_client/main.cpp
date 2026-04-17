@@ -13,10 +13,19 @@
 
 using namespace casket;
 
-class EchoClient
+struct BenchmarkConfig
+{
+    std::string socketPath = "/tmp/echo_server";
+    size_t durationSeconds = 10;
+    size_t messageSize = 64;
+    size_t numClients = 1;
+    bool reconnectPerMessage = false;
+};
+
+class SimpleClient
 {
 public:
-    EchoClient(const std::string& socketPath, size_t messageSize = 64)
+    SimpleClient(const std::string& socketPath, size_t messageSize)
         : socketPath_(socketPath)
         , messageSize_(messageSize)
     {
@@ -32,14 +41,14 @@ public:
         return socket_.connect(socketPath_);
     }
 
-    bool isConnected() const
-    {
-        return socket_.isValid();
-    }
-
     void close()
     {
         socket_.close();
+    }
+
+    bool isConnected() const
+    {
+        return socket_.isValid();
     }
 
     bool sendMessage()
@@ -47,9 +56,7 @@ public:
         if (!socket_.isValid())
         {
             if (!connect())
-            {
                 return false;
-            }
         }
 
         ssize_t sent = socket_.send(message_.data(), message_.size());
@@ -60,13 +67,12 @@ public:
         }
 
         uint8_t buffer[4096];
-        ByteBuffer response;
-
+        ByteBuffer response(4096);
         size_t expectedSize = message_.size();
         auto startTime = std::chrono::steady_clock::now();
         const auto timeout = std::chrono::milliseconds(100);
 
-        while (response.size() < expectedSize)
+        while (response.availableWrite() < expectedSize)
         {
             auto now = std::chrono::steady_clock::now();
             if (now - startTime > timeout)
@@ -101,7 +107,7 @@ private:
     std::vector<uint8_t> message_;
 };
 
-void printProgress(int percent, size_t currentMessages, double currentRate)
+void printProgress(int percent, size_t current, double rate, const char* unit)
 {
     std::cout << "\r[";
     int barWidth = 50;
@@ -118,37 +124,38 @@ void printProgress(int percent, size_t currentMessages, double currentRate)
     }
 
     std::cout << "] " << percent << "% ";
-    std::cout << "(" << currentMessages << " msgs, ";
-    std::cout << std::fixed << std::setprecision(0) << currentRate << " msg/s)";
+    std::cout << "(" << current << " " << unit << ", ";
+    std::cout << std::fixed << std::setprecision(0) << rate << " " << unit << "/s)";
     std::cout << std::flush;
 }
 
 int main(int argc, char* argv[])
 {
-    std::cout.setf(std::ios::unitbuf);
+    std::cout << std::unitbuf;
 
-    std::string socketPath = "/tmp/echo_server";
-    size_t durationSeconds = 10;
-    size_t messageSize = 64;
-    size_t numClients = 1;
+    BenchmarkConfig config;
 
     for (int i = 1; i < argc; ++i)
     {
         if (strcmp(argv[i], "--socket") == 0 && i + 1 < argc)
         {
-            socketPath = argv[++i];
+            config.socketPath = argv[++i];
         }
         else if (strcmp(argv[i], "--duration") == 0 && i + 1 < argc)
         {
-            durationSeconds = std::stoul(argv[++i]);
+            config.durationSeconds = std::stoul(argv[++i]);
         }
         else if (strcmp(argv[i], "--size") == 0 && i + 1 < argc)
         {
-            messageSize = std::stoul(argv[++i]);
+            config.messageSize = std::stoul(argv[++i]);
         }
         else if (strcmp(argv[i], "--clients") == 0 && i + 1 < argc)
         {
-            numClients = std::stoul(argv[++i]);
+            config.numClients = std::stoul(argv[++i]);
+        }
+        else if (strcmp(argv[i], "--reconnect") == 0)
+        {
+            config.reconnectPerMessage = true;
         }
         else if (strcmp(argv[i], "--help") == 0)
         {
@@ -158,89 +165,92 @@ int main(int argc, char* argv[])
                       << "  --duration SEC    Test duration in seconds (default: 10)\n"
                       << "  --size BYTES      Message size in bytes (default: 64)\n"
                       << "  --clients N       Number of concurrent clients (default: 1)\n"
+                      << "  --reconnect       Reconnect for each message (measure connection rate)\n"
                       << "  --help            Show this help\n";
             return 0;
         }
     }
 
-    std::cout << "=== Echo Server Benchmark ===\n"
-              << "Socket: " << socketPath << "\n"
-              << "Duration: " << durationSeconds << " seconds\n"
-              << "Message size: " << messageSize << " bytes\n"
-              << "Concurrent clients: " << numClients << "\n"
+    std::cout << "=== Benchmark ===\n"
+              << "Socket: " << config.socketPath << "\n"
+              << "Duration: " << config.durationSeconds << "s\n"
+              << "Message size: " << config.messageSize << " bytes\n"
+              << "Clients: " << config.numClients << "\n"
+              << "Mode: " << (config.reconnectPerMessage ? "reconnect (CPS)" : "persistent (msg/s)") << "\n"
               << std::endl;
 
-    std::vector<std::unique_ptr<EchoClient>> clients;
+    std::vector<std::unique_ptr<SimpleClient>> clients;
     std::vector<std::thread> threads;
-    std::atomic<size_t> totalMessages(0);
+    std::atomic<size_t> totalSuccess{0};
 
-    for (size_t i = 0; i < numClients; ++i)
+    for (size_t i = 0; i < config.numClients; ++i)
     {
-        clients.push_back(std::make_unique<EchoClient>(socketPath, messageSize));
+        clients.push_back(std::make_unique<SimpleClient>(config.socketPath, config.messageSize));
     }
 
     std::cout << "Connecting clients... " << std::endl;
-    for (auto& client : clients)
+    if (!config.reconnectPerMessage)
     {
-        if (!client->connect())
+        for (auto& client : clients)
         {
-            std::cerr << "Failed to connect client" << std::endl;
-            return 1;
+            if (!client->connect())
+            {
+                std::cerr << "Failed to connect client" << std::endl;
+                return 1;
+            }
         }
     }
 
     std::cout << "Running benchmark..." << std::endl;
 
     auto startTime = std::chrono::steady_clock::now();
-    auto endTime = startTime + std::chrono::seconds(durationSeconds);
+    auto endTime = startTime + std::chrono::seconds(config.durationSeconds);
 
-    for (size_t i = 0; i < numClients; ++i)
+    for (size_t i = 0; i < config.numClients; ++i)
     {
         threads.emplace_back(
-            [client = clients[i].get(), &totalMessages, endTime]()
+            [&, client = clients[i].get()]()
             {
                 size_t counter = 0;
 
                 while (std::chrono::steady_clock::now() < endTime)
                 {
-                    if (client->sendMessage())
+                    if (config.reconnectPerMessage)
                     {
-                        counter++;
-
-                        if (counter % 100 == 0)
+                        SimpleClient tempClient(config.socketPath, config.messageSize);
+                        if (tempClient.connect())
                         {
-                            totalMessages += 100;
+                            if (tempClient.sendMessage())
+                            {
+                                counter++;
+                            }
+                            tempClient.close();
                         }
-
-                        client->close();
-                        client->connect();
                     }
                     else
                     {
-                        totalMessages = 0;
-                        counter = 0;
-
-                        client->close();
-                        if (!client->connect())
+                        if (client->sendMessage())
                         {
-                            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                            counter++;
+                        }
+                        else
+                        {
+                            client->close();
+                            client->connect();
                         }
                     }
                 }
 
-                totalMessages += (counter % 100);
+                totalSuccess += counter;
             });
     }
 
     std::atomic<bool> progressRunning(true);
     std::thread progressThread(
-        [&totalMessages, &progressRunning, &startTime, durationSeconds]()
+        [&]()
         {
             auto lastUpdate = startTime;
-            size_t lastMessages = 0;
-            int lastPercent = -1;
-
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            size_t lastSuccess = 0;
 
             while (progressRunning)
             {
@@ -252,106 +262,57 @@ int main(int argc, char* argv[])
                 if (elapsed < 0)
                     continue;
 
-                int percent = static_cast<int>(elapsed * 100 / durationSeconds);
-                percent = std::clamp(percent, 0, 100);
+                int percent = std::min(100, static_cast<int>(elapsed * 100 / config.durationSeconds));
+                size_t current = totalSuccess.load();
 
-                size_t currentMessages = totalMessages.load(std::memory_order_relaxed);
-
-                double currentRate = 0.0;
-                auto timeSinceLast =
-                    std::chrono::duration_cast<std::chrono::duration<double>>(now - lastUpdate).count();
-
-                if (timeSinceLast > 0.5 && lastUpdate != startTime)
+                double rate = 0;
+                auto timeSinceLast = std::chrono::duration_cast<std::chrono::milliseconds>(now - lastUpdate).count();
+                if (timeSinceLast > 500 && lastUpdate != startTime)
                 {
-                    if (currentMessages >= lastMessages)
-                    {
-                        currentRate = (currentMessages - lastMessages) / timeSinceLast;
-                        currentRate = std::min(currentRate, 10000000.0);
-                    }
-                }
-
-                if (percent != lastPercent || percent == 100)
-                {
-                    std::cout << "\r\033[K";
-                    std::cout << "[";
-                    int barWidth = 50;
-                    int pos = barWidth * percent / 100;
-
-                    for (int i = 0; i < barWidth; ++i)
-                    {
-                        if (i < pos)
-                            std::cout << "=";
-                        else if (i == pos && percent < 100)
-                            std::cout << ">";
-                        else
-                            std::cout << " ";
-                    }
-
-                    std::cout << "] " << percent << "% ";
-                    std::cout << "(" << currentMessages << " msgs, ";
-                    std::cout << std::fixed << std::setprecision(0) << currentRate << " msg/s)";
-                    std::cout << std::flush;
-
-                    lastPercent = percent;
-                }
-
-                if (timeSinceLast > 0.5)
-                {
-                    lastMessages = currentMessages;
+                    rate = (current - lastSuccess) * 1000.0 / timeSinceLast;
+                    lastSuccess = current;
                     lastUpdate = now;
                 }
-            }
 
-            std::cout << "\r\033[K";
-            std::cout << "[";
-            for (int i = 0; i < 50; ++i)
-                std::cout << "=";
-            std::cout << "] 100% (" << totalMessages.load() << " msgs, done)";
+                const char* unit = config.reconnectPerMessage ? "conns" : "msgs";
+                printProgress(percent, current, rate, unit);
+            }
             std::cout << std::endl;
         });
 
-    for (auto& thread : threads)
+    for (auto& t : threads)
     {
-        thread.join();
+        t.join();
     }
 
     progressRunning = false;
-    if (progressThread.joinable())
+    progressThread.join();
+
+    auto endTimeReal = std::chrono::steady_clock::now();
+    double actualDuration = std::chrono::duration_cast<std::chrono::duration<double>>(endTimeReal - startTime).count();
+
+    size_t finalSuccess = totalSuccess.load();
+
+    if (finalSuccess == 0)
     {
-        progressThread.join();
-    }
-
-    auto endRealTime = std::chrono::steady_clock::now();
-    auto actualDuration = std::chrono::duration_cast<std::chrono::duration<double>>(endRealTime - startTime).count();
-
-    size_t finalMessages = totalMessages.load();
-
-    if (finalMessages == 0)
-    {
-        std::cerr << "\nError: No messages were processed successfully!" << std::endl;
-        std::cerr << "Check if server is running and responding correctly." << std::endl;
+        std::cerr << "\nError: No successful operations!" << std::endl;
         return 1;
     }
 
-    double messagesPerSecond = finalMessages / actualDuration;
-    double megabytesPerSecond = (finalMessages * messageSize) / (actualDuration * 1024 * 1024);
-    double microsecondsPerMessage = (actualDuration * 1000000) / finalMessages;
+    double opsPerSecond = finalSuccess / actualDuration;
+    const char* unit = config.reconnectPerMessage ? "conns/s" : "msg/s";
 
     std::cout << "\n\n=== Results ===\n"
-              << "Total messages: " << finalMessages << "\n"
-              << "Total data: " << std::fixed << std::setprecision(2)
-              << (finalMessages * messageSize) / (1024.0 * 1024.0) << " MB\n"
-              << "Actual duration: " << std::setprecision(3) << actualDuration << " seconds\n"
-              << "Messages/second: " << std::setprecision(0) << messagesPerSecond << " msg/s\n"
-              << "Throughput: " << std::setprecision(2) << megabytesPerSecond << " MB/s\n"
-              << "Latency (avg): " << std::setprecision(2) << microsecondsPerMessage << " μs/msg\n";
+              << "Successful: " << finalSuccess << "\n"
+              << "Duration: " << std::fixed << std::setprecision(3) << actualDuration << "s\n"
+              << "Rate: " << std::setprecision(0) << opsPerSecond << " " << unit << "\n";
 
-    if (numClients > 1)
+    if (!config.reconnectPerMessage)
     {
-        double messagesPerClient = finalMessages / static_cast<double>(numClients);
-        std::cout << "\nPer client average:\n"
-                  << "  Messages/client: " << std::setprecision(0) << messagesPerClient << "\n"
-                  << "  Msg/s per client: " << std::setprecision(0) << messagesPerClient / actualDuration << " msg/s\n";
+        double mbps = (finalSuccess * config.messageSize) / (actualDuration * 1024 * 1024);
+        double latencyUs = (actualDuration * 1000000) / finalSuccess;
+        std::cout << "Throughput: " << std::setprecision(2) << mbps << " MB/s\n"
+                  << "Avg latency: " << std::setprecision(2) << latencyUs << " μs\n";
     }
 
     return 0;

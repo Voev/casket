@@ -17,13 +17,21 @@ int main()
     server.setConnectionHandler(
         [](ByteBuffer& request, ByteBuffer& response)
         {
-            size_t requestSize = request.readable();
-            size_t responseSize = response.write(request.data() + request.readPos(), requestSize);
-            request.consume(requestSize);
-
-            std::cout << "Processed " << 1 << " messages, "
-                          << "request size: " << requestSize << ", response size: " << responseSize << std::endl;
+            size_t available = request.availableRead();
+            if (available > 0)
+            {
+                auto data = request.peekContiguous(available);
+                
+                response.write(data.data(), data.size());
+                
+                request.consume(available);
+            }
         });
+
+    server.setErrorHandler([](const std::error_code& ec)
+    {
+        std::cout << "Error: " << ec.message() << std::endl;
+    });
 
     int signals[] = {SIGINT, SIGTERM};
 

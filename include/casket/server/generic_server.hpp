@@ -123,31 +123,6 @@ struct ServerStatistics
            << " MB/s\n"
            << "  Average message size: " << std::setprecision(0) << getAverageMessageSize() << " bytes\n";
     }
-
-    void printCSV(std::ostream& os = std::cout) const
-    {
-        double uptime = getUptimeSeconds();
-        os << uptime << "," << totalConnections.load() << "," << activeConnections.load() << ","
-           << peakConnections.load() << "," << totalDisconnections.load() << "," << totalMessagesProcessed.load() << ","
-           << totalBytesReceived.load() << "," << totalBytesSent.load() << "," << totalErrors.load() << ","
-           << (uptime > 0 ? totalMessagesProcessed.load() / uptime : 0) << ","
-           << (uptime > 0 ? totalBytesReceived.load() / (uptime * 1024 * 1024) : 0);
-    }
-
-    static void printCSVHeader(std::ostream& os = std::cout)
-    {
-        os << "uptime_seconds,"
-           << "total_connections,"
-           << "active_connections,"
-           << "peak_connections,"
-           << "total_disconnections,"
-           << "total_messages,"
-           << "total_bytes_recv,"
-           << "total_bytes_sent,"
-           << "total_errors,"
-           << "messages_per_sec,"
-           << "throughput_mb_per_sec\n";
-    }
 };
 
 template <typename Transport>
@@ -162,11 +137,10 @@ public:
     {
         size_t bufferSize{8192};
         size_t bufferPoolSize{1024};
-        std::chrono::seconds idleTimeout{60};
+        std::chrono::seconds idleTimeout{10};
         int maxEvents{64};
         int waitTimeoutMs{100};
         bool enableStatistics{true};
-        std::chrono::seconds statisticsPrintInterval{5};
     };
 
     explicit GenericServer(const Config& config = Config{})
@@ -239,27 +213,6 @@ public:
             return;
         }
         running_ = true;
-
-        if (config_.enableStatistics)
-        {
-            statisticsThread_ = std::thread(
-                [this]()
-                {
-                    while (running_)
-                    {
-                        std::this_thread::sleep_for(config_.statisticsPrintInterval);
-                        if (running_ && statisticsHandler_)
-                        {
-                            statisticsHandler_(statistics_);
-                        }
-                        else if (running_ && config_.enableStatistics)
-                        {
-                            std::lock_guard<std::mutex> lock(statisticsMutex_);
-                            statistics_.print(std::cout);
-                        }
-                    }
-                });
-        }
     }
 
     bool step()
@@ -303,6 +256,7 @@ public:
                 handleClientData(event.fd, event.revents);
             }
         }
+
         cleanupIdleConnections();
 
         return running_;
@@ -324,11 +278,6 @@ public:
     void stop()
     {
         running_ = false;
-
-        if (statisticsThread_.joinable())
-        {
-            statisticsThread_.join();
-        }
 
         if (poller_)
         {
@@ -364,6 +313,18 @@ public:
         return clients_.size();
     }
 
+    void printPeriodicStats(std::chrono::seconds interval, std::ostream& os = std::cout)
+    {
+        static auto lastPrint = std::chrono::steady_clock::now();
+        auto now = std::chrono::steady_clock::now();
+
+        if (now - lastPrint >= interval)
+        {
+            statistics_.print(os);
+            lastPrint = now;
+        }
+    }
+
 private:
     struct ClientContext
     {
@@ -387,9 +348,13 @@ private:
         {
         }
 
+        ~ClientContext() noexcept
+        {
+        }
+
         bool hasDataToWrite() const
         {
-            return (writeBuffer && writeBuffer->readable() > 0);
+            return writeBuffer && writeBuffer->availableRead() > 0;
         }
 
         int getFd() const
@@ -534,14 +499,14 @@ private:
             return;
         }
 
-        while (ctx->readBuffer->readable() > 0)
+        while (ctx->readBuffer->availableRead() > 0)
         {
             size_t oldReadPos = ctx->readBuffer->readPos();
             size_t oldWritePos = ctx->writeBuffer->writePos();
 
             connectionHandler_(*ctx->readBuffer, *ctx->writeBuffer);
 
-            /// If the handler hasn't read anything, we exit.
+            // If the handler hasn't read anything, we exit
             if (ctx->readBuffer->readPos() == oldReadPos)
             {
                 break;
@@ -561,8 +526,8 @@ private:
                 statistics_.recordMessage();
             }
 
-            /// Senging a reply.
-            if (ctx->writeBuffer->readable() > 0)
+            // Sending a reply
+            if (ctx->writeBuffer->availableRead() > 0)
             {
                 flushWriteBuffer(ctx);
             }
@@ -571,83 +536,62 @@ private:
 
     void handleClientRead(ClientContext* ctx)
     {
-        if (!ctx->readBuffer)
+        if (!ctx->readBuffer || !ctx->transport)
             return;
 
-        const int MAX_RETRY_ATTEMPTS = 3;
-
-        while (true)
+        if (ctx->writeBuffer->availableRead() > 0)
         {
-            size_t available;
-            uint8_t* buffer = ctx->readBuffer->prepareWrite(available);
+            flushWriteBuffer(ctx);
+        }
 
-            if (available == 0)
-            {
-                /// Buffer is full, we must process data.
-                int retryCount = 0;
-                bool spaceFreed = false;
+        if (ctx->readBuffer->availableWrite() == 0)
+        {
+            processClientData(ctx);
 
-                while (retryCount < MAX_RETRY_ATTEMPTS && !spaceFreed)
-                {
-                    processClientData(ctx);
-
-                    if (ctx->writeBuffer->readable() > 0)
-                    {
-                        flushWriteBuffer(ctx);
-                    }
-
-                    buffer = ctx->readBuffer->prepareWrite(available);
-                    if (available > 0)
-                    {
-                        spaceFreed = true;
-                        break;
-                    }
-
-                    retryCount++;
-
-                    if (retryCount < MAX_RETRY_ATTEMPTS)
-                    {
-                        std::this_thread::yield();
-                    }
-                }
-
-                if (!spaceFreed)
-                {
-                    if (errorHandler_)
-                    {
-                        errorHandler_(std::make_error_code(std::errc::no_buffer_space));
-                    }
-
-                    removeClient(ctx->getFd());
-                    return;
-                }
-            }
-
-            ssize_t received = ctx->transport->recv(buffer, available);
-
-            if (received > 0)
-            {
-                ctx->readBuffer->commit(received);
-                ctx->updateActivity();
-                processClientData(ctx);
-            }
-            else if (received < 0)
-            {
-                if (ctx->transport->lastError() != std::errc::resource_unavailable_try_again)
-                {
-                    if (errorHandler_)
-                    {
-                        errorHandler_(ctx->transport->lastError());
-                    }
-                    removeClient(ctx->getFd());
-                }
-                break;
-            }
-            else // received == 0
+            if (ctx->readBuffer->availableWrite() == 0)
             {
                 removeClient(ctx->getFd());
                 return;
             }
+        }
+
+        if (!ctx->transport)
+        {
+            /// Already closed
+            return;
+        }
+
+        struct iovec iov[2];
+        size_t iovcnt = ctx->readBuffer->getWriteIovec(iov, 2);
+
+        if (iovcnt == 0)
+        {
+            removeClient(ctx->getFd());
+            return;
+        }
+
+        struct msghdr msg{};
+        msg.msg_iov = iov;
+        msg.msg_iovlen = iovcnt;
+
+        ssize_t received = ctx->transport->recvmsg(&msg, 0);
+
+        if (received > 0)
+        {
+            ctx->readBuffer->commitWrite(received);
+            ctx->updateActivity();
+            processClientData(ctx);
+        }
+        else if (received < 0)
+        {
+            if (ctx->transport->lastError() != std::errc::resource_unavailable_try_again)
+            {
+                removeClient(ctx->getFd());
+            }
+        }
+        else // received == 0
+        {
+            removeClient(ctx->getFd());
         }
     }
 
@@ -660,18 +604,23 @@ private:
 
         ctx->isWriting = true;
 
-        while (ctx->writeBuffer->readable() > 0)
+        while (ctx->writeBuffer->availableRead() > 0)
         {
-            size_t available;
-            uint8_t* buffer = ctx->writeBuffer->prepareRead(available);
-            if (available == 0)
+            struct iovec iov[2];
+            size_t iovcnt = ctx->writeBuffer->getReadIovec(iov, 2);
+
+            if (iovcnt == 0)
                 break;
 
-            ssize_t sent = ctx->transport->send(buffer, available);
+            struct msghdr msg{};
+            msg.msg_iov = iov;
+            msg.msg_iovlen = iovcnt;
+
+            ssize_t sent = ctx->transport->sendmsg(&msg, 0);
 
             if (sent > 0)
             {
-                ctx->writeBuffer->consume(sent);
+                ctx->writeBuffer->commitRead(sent);
                 ctx->updateActivity();
             }
             else if (sent < 0)
@@ -694,13 +643,13 @@ private:
             }
         }
 
-        ctx->writeBuffer->reset();
+        ctx->writeBuffer->clear();
         ctx->isWriting = false;
     }
 
     void handleClientWrite(ClientContext* ctx)
     {
-        if (ctx->writeBuffer->readable() > 0)
+        if (ctx->writeBuffer->availableRead() > 0)
         {
             flushWriteBuffer(ctx);
         }
@@ -713,27 +662,19 @@ private:
 
     void handleClientData(int fd, EventType revents)
     {
-        std::unique_ptr<ClientContext> ctx;
-
         auto it = clients_.find(fd);
         if (it == clients_.end())
         {
             return;
         }
-        ctx = std::move(it->second);
-        clients_.erase(it);
 
+        ClientContext* ctx = it->second.get();
         if (!ctx)
         {
             return;
         }
 
-        handleClientEvents(ctx.get(), revents);
-
-        if (ctx->transport && ctx->transport->isConnected())
-        {
-            clients_[fd] = std::move(ctx);
-        }
+        handleClientEvents(ctx, revents);
     }
 
     void removeClient(int fd)
@@ -830,7 +771,7 @@ private:
         std::unique_ptr<ByteBuffer> buffer;
         if (freeReadBuffers_.pop(buffer))
         {
-            buffer->reset();
+            buffer->clear();
             return buffer;
         }
         return std::make_unique<ByteBuffer>(config_.bufferSize);
@@ -840,7 +781,7 @@ private:
     {
         if (buffer)
         {
-            buffer->reset();
+            buffer->clear();
             freeReadBuffers_.push(std::move(buffer));
         }
     }
@@ -850,7 +791,7 @@ private:
         std::unique_ptr<ByteBuffer> buffer;
         if (freeWriteBuffers_.pop(buffer))
         {
-            buffer->reset();
+            buffer->clear();
             return buffer;
         }
         return std::make_unique<ByteBuffer>(config_.bufferSize);
@@ -860,7 +801,7 @@ private:
     {
         if (buffer)
         {
-            buffer->reset();
+            buffer->clear();
             freeWriteBuffers_.push(std::move(buffer));
         }
     }
@@ -884,8 +825,6 @@ private:
     std::unordered_map<int, std::unique_ptr<ClientContext>> clients_;
 
     ServerStatistics statistics_;
-    std::thread statisticsThread_;
-    mutable std::mutex statisticsMutex_;
 };
 
 template <typename Transport>
@@ -897,17 +836,13 @@ void printServerStats(const GenericServer<Transport>& server, std::ostream& os =
 template <typename Transport>
 void enablePeriodicStats(GenericServer<Transport>& server, std::chrono::seconds interval, std::ostream& os = std::cout)
 {
-    server.setStatisticsHandler(
-        [interval, &os](const ServerStatistics& stats)
-        {
-            static auto lastPrint = std::chrono::steady_clock::now();
-            auto now = std::chrono::steady_clock::now();
-            if (now - lastPrint >= interval)
-            {
-                stats.print(os);
-                lastPrint = now;
-            }
-        });
+    static auto lastPrint = std::chrono::steady_clock::now();
+    auto now = std::chrono::steady_clock::now();
+    if (now - lastPrint >= interval)
+    {
+        server.printStatistics(os);
+        lastPrint = now;
+    }
 }
 
 } // namespace casket
