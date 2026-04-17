@@ -29,7 +29,7 @@ TEST_F(UnixSocketTest, ConnectFailsWhenServerNotExists)
     bool connected = client.connect("/tmp/non_existent_socket");
 
     EXPECT_FALSE(connected);
-    EXPECT_FALSE(client.isConnected());
+    EXPECT_FALSE(client.isValid());
     EXPECT_NE(client.lastError().value(), 0);
 }
 
@@ -42,7 +42,7 @@ TEST_F(UnixSocketTest, ConnectSuccessWhenServerExists)
     bool connected = client.connect(socketPath_);
 
     EXPECT_TRUE(connected);
-    EXPECT_TRUE(client.isConnected());
+    EXPECT_TRUE(client.isValid());
     EXPECT_EQ(client.lastError().value(), 0);
 }
 
@@ -55,7 +55,7 @@ TEST_F(UnixSocketTest, SendAndReceiveData)
     ASSERT_TRUE(client.connect(socketPath_));
 
     auto clientSocket = server.accept();
-    ASSERT_TRUE(clientSocket.isConnected());
+    ASSERT_TRUE(clientSocket.isValid());
 
     std::string message = "Hello, Server!";
     ssize_t sent = client.send(reinterpret_cast<const uint8_t*>(message.data()), message.size());
@@ -80,7 +80,7 @@ TEST_F(UnixSocketTest, SendAndReceiveMultipleMessages)
     ASSERT_TRUE(client.connect(socketPath_));
 
     auto clientSocket = server.accept();
-    ASSERT_TRUE(clientSocket.isConnected());
+    ASSERT_TRUE(clientSocket.isValid());
 
     std::vector<std::string> messages = {"Message 1", "Message 2", "Message 3"};
 
@@ -105,7 +105,7 @@ TEST_F(UnixSocketTest, SendEmptyMessage)
     ASSERT_TRUE(client.connect(socketPath_));
 
     auto clientSocket = server.accept();
-    ASSERT_TRUE(clientSocket.isConnected());
+    ASSERT_TRUE(clientSocket.isValid());
 
     ssize_t sent = client.send(nullptr, 0);
     EXPECT_EQ(sent, 0);
@@ -125,7 +125,7 @@ TEST_F(UnixSocketTest, RecvWithSmallBuffer)
     ASSERT_TRUE(client.connect(socketPath_));
 
     auto clientSocket = server.accept();
-    ASSERT_TRUE(clientSocket.isConnected());
+    ASSERT_TRUE(clientSocket.isValid());
 
     std::string message = "This is a long message";
     client.send(reinterpret_cast<const uint8_t*>(message.data()), message.size());
@@ -146,7 +146,7 @@ TEST_F(UnixSocketTest, RecvReturnsWouldBlockWhenNoData)
     ASSERT_TRUE(client.connect(socketPath_));
 
     auto clientSocket = server.accept();
-    ASSERT_TRUE(clientSocket.isConnected());
+    ASSERT_TRUE(clientSocket.isValid());
 
     uint8_t buffer[256];
     ssize_t received = clientSocket.recv(buffer, sizeof(buffer));
@@ -164,7 +164,7 @@ TEST_F(UnixSocketTest, SendReturnsWouldBlockWhenBufferFull)
     ASSERT_TRUE(client.connect(socketPath_));
 
     auto clientSocket = server.accept();
-    ASSERT_TRUE(clientSocket.isConnected());
+    ASSERT_TRUE(clientSocket.isValid());
 
     std::vector<uint8_t> largeBuffer(1024 * 1024, 'x');
     ssize_t totalSent = 0;
@@ -196,14 +196,14 @@ TEST_F(UnixSocketTest, ServerListenAndAccept)
 
     bool listening = server.listen(socketPath_);
     ASSERT_TRUE(listening);
-    EXPECT_TRUE(server.isConnected());
+    EXPECT_TRUE(server.isValid());
     EXPECT_GE(server.getFd(), 0);
 
     UnixSocket client;
     ASSERT_TRUE(client.connect(socketPath_));
 
     auto clientSocket = server.accept();
-    EXPECT_TRUE(clientSocket.isConnected());
+    EXPECT_TRUE(clientSocket.isValid());
     EXPECT_GE(clientSocket.getFd(), 0);
 }
 
@@ -214,7 +214,7 @@ TEST_F(UnixSocketTest, AcceptWithoutClient)
 
     auto clientSocket = server.accept();
 
-    EXPECT_FALSE(clientSocket.isConnected());
+    EXPECT_FALSE(clientSocket.isValid());
     EXPECT_EQ(clientSocket.getFd(), -1);
 }
 
@@ -236,7 +236,7 @@ TEST_F(UnixSocketTest, MultipleClientsConnect)
     for (int i = 0; i < numClients; ++i)
     {
         auto clientSocket = server.accept();
-        EXPECT_TRUE(clientSocket.isConnected());
+        EXPECT_TRUE(clientSocket.isValid());
     }
 }
 
@@ -249,11 +249,11 @@ TEST_F(UnixSocketTest, CloseConnection)
     ASSERT_TRUE(client.connect(socketPath_));
 
     auto clientSocket = server.accept();
-    ASSERT_TRUE(clientSocket.isConnected());
+    ASSERT_TRUE(clientSocket.isValid());
 
     client.close();
 
-    EXPECT_FALSE(client.isConnected());
+    EXPECT_FALSE(client.isValid());
     EXPECT_EQ(client.getFd(), -1);
 
     uint8_t data[] = {1, 2, 3};
@@ -290,7 +290,7 @@ TEST_F(UnixSocketTest, ConcurrentSendReceive)
     ASSERT_TRUE(client.connect(socketPath_));
 
     auto clientSocket = server.accept();
-    ASSERT_TRUE(clientSocket.isConnected());
+    ASSERT_TRUE(clientSocket.isValid());
 
     std::thread sender(
         [&client]()
@@ -325,7 +325,7 @@ TEST_F(UnixSocketTest, BidirectionalCommunication)
     ASSERT_TRUE(client.connect(socketPath_));
 
     auto serverClient = server.accept();
-    ASSERT_TRUE(serverClient.isConnected());
+    ASSERT_TRUE(serverClient.isValid());
 
     std::string msg1 = "Client to Server";
     std::string msg2 = "Server to Client";
@@ -358,6 +358,6 @@ TEST_F(UnixSocketTest, ErrorCodeAfterFailedAccept)
     UnixSocket notListeningSocket;
 
     auto client = notListeningSocket.accept();
-    EXPECT_FALSE(client.isConnected());
+    EXPECT_FALSE(client.isValid());
     EXPECT_FALSE(notListeningSocket.lastError());
 }

@@ -17,8 +17,15 @@ namespace casket
 class TcpSocket final : public TransportBase<TcpSocket>
 {
 public:
+    friend class TransportBase<TcpSocket>;
+
     TcpSocket() = default;
-    
+
+    ~TcpSocket() noexcept
+    {
+        closeImpl();
+    }
+
     explicit TcpSocket(int fd)
         : fd_(fd)
         , connected_(fd >= 0)
@@ -29,12 +36,32 @@ public:
         }
     }
 
+    TcpSocket(const TcpSocket&) = delete;
+
+    TcpSocket& operator=(const TcpSocket&) = delete;
+
+    TcpSocket(TcpSocket&& other) noexcept
+        : ec_(std::move(other.ec_))
+        , fd_(std::exchange(other.fd_, -1))
+        , connected_(std::exchange(other.connected_, false))
+    {
+    }
+
+    TcpSocket& operator=(TcpSocket&& other) noexcept
+    {
+        if (this != &other)
+        {
+            closeImpl();
+
+            ec_ = std::move(other.ec_);
+            fd_ = std::exchange(other.fd_, -1);
+            connected_ = std::exchange(other.connected_, false);
+        }
+        return *this;
+    }
+
     bool connect(const std::string& host, int port)
     {
-        isServer_ = false;
-        host_ = host;
-        port_ = port;
-
         fd_ = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0);
         if (fd_ < 0)
         {
@@ -63,10 +90,6 @@ public:
 
     bool listen(int port, const std::string& address = "0.0.0.0")
     {
-        isServer_ = true;
-        port_ = port;
-        address_ = address;
-
         fd_ = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0);
         if (fd_ < 0)
         {
@@ -109,7 +132,7 @@ public:
 
     TcpSocket accept()
     {
-        if (!isServer_ || fd_ < 0)
+        if (fd_ < 0)
         {
             return TcpSocket();
         }
@@ -131,6 +154,7 @@ public:
         return client;
     }
 
+private:
     ssize_t sendImpl(const uint8_t* data, size_t length)
     {
         if (!connected_)
@@ -186,9 +210,64 @@ public:
         return n;
     }
 
-    bool isConnectedImpl() const
+    ssize_t sendmsgImpl(const struct msghdr* msg, int flags = 0)
     {
-        return (connected_ && fd_ >= 0);
+        if (!connected_)
+        {
+            SetSystemError(ec_, std::errc::not_connected);
+            return -1;
+        }
+
+        ssize_t n = ::sendmsg(fd_, msg, flags | MSG_NOSIGNAL);
+        if (n < 0)
+        {
+            ec_ = GetLastSystemError();
+            if (ec_ != std::errc::resource_unavailable_try_again)
+            {
+                connected_ = false;
+            }
+        }
+        else
+        {
+            ec_.clear();
+        }
+
+        return n;
+    }
+
+    ssize_t recvmsgImpl(struct msghdr* msg, int flags = 0)
+    {
+        if (!connected_)
+        {
+            SetSystemError(ec_, std::errc::not_connected);
+            return -1;
+        }
+
+        ssize_t n = ::recvmsg(fd_, msg, flags | MSG_DONTWAIT);
+        if (n < 0)
+        {
+            ec_ = GetLastSystemError();
+            if (ec_ != std::errc::resource_unavailable_try_again)
+            {
+                connected_ = false;
+            }
+        }
+        else if (n == 0)
+        {
+            SetSystemError(ec_, std::errc::connection_reset);
+            connected_ = false;
+        }
+        else
+        {
+            ec_.clear();
+        }
+
+        return n;
+    }
+
+    bool isValidImpl() const
+    {
+        return (fd_ != -1);
     }
 
     int getFdImpl() const
@@ -212,7 +291,6 @@ public:
         ec_.clear();
     }
 
-private:
     static inline void createAddress(sockaddr_in& addr, const char* host, int port)
     {
         addr.sin_family = AF_INET;
@@ -235,13 +313,9 @@ private:
     }
 
 private:
-    std::string address_;
-    std::string host_;
-    int port_{0};
     std::error_code ec_;
     int fd_{-1};
     bool connected_{false};
-    bool isServer_{false};
 };
 
 } // namespace casket
