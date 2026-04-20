@@ -2,10 +2,8 @@
 #include <string>
 #include <utility>
 #include <system_error>
-#include <sys/socket.h>
-#include <sys/un.h>
-#include <unistd.h>
-#include <fcntl.h>
+
+#include <casket/transport/socket_ops.hpp>
 #include <casket/transport/transport_base.hpp>
 #include <casket/utils/error_code.hpp>
 
@@ -30,9 +28,7 @@ public:
 
     UnixSocket(UnixSocket&& other) noexcept
         : path_(std::move(other.path_))
-        , ec_(std::move(other.ec_))
         , fd_(std::exchange(other.fd_, -1))
-        , connected_(std::exchange(other.connected_, false))
         , isServer_(std::exchange(other.isServer_, false))
     {
     }
@@ -44,209 +40,209 @@ public:
             closeImpl();
 
             path_ = std::move(other.path_);
-            ec_ = std::move(other.ec_);
             fd_ = std::exchange(other.fd_, -1);
-            connected_ = std::exchange(other.connected_, false);
             isServer_ = std::exchange(other.isServer_, false);
         }
         return *this;
     }
 
-    bool connect(const std::string& path)
+    bool connect(const std::string& path, const bool nonblock, std::error_code& ec)
     {
+        if (path.empty())
+        {
+            SetSystemError(ec, std::errc::invalid_argument);
+            return false;
+        }
+
         path_ = path;
 
-        fd_ = createSocket();
+        fd_ = CreateSocket(AF_UNIX, SOCK_STREAM, 0, ec);
         if (fd_ < 0)
         {
-            ec_ = GetLastSystemError();
             return false;
         }
 
-        struct sockaddr_un addr{};
-        createAddress(addr, path.c_str());
-
-        if (::connect(fd_, (struct sockaddr*)&addr, sizeof(addr)) < 0)
+        SetNonBlocking(fd_, nonblock, ec);
+        if (ec)
         {
-            ec_ = GetLastSystemError();
-            ::close(fd_);
-            fd_ = -1;
+            closeSocket();
             return false;
         }
 
-        connected_ = true;
-        ec_.clear();
+        SocketAddrUnixType addr{};
+        if (!createAddress(addr, path.c_str(), ec))
+        {
+            closeSocket();
+            return false;
+        }
+
+        if (Connect(fd_, (SocketAddrType*)&addr, sizeof(addr), ec) < 0)
+        {
+            closeSocket();
+            return false;
+        }
+
         return true;
     }
 
-    bool listen(const std::string& path)
+    bool listen(const std::string& path, int backlog, std::error_code& ec)
     {
+        if (path.empty())
+        {
+            SetSystemError(ec, std::errc::invalid_argument);
+            return false;
+        }
+
         path_ = path;
         isServer_ = true;
 
-        fd_ = createSocket();
+        fd_ = CreateSocket(AF_UNIX, SOCK_STREAM, 0, ec);
         if (fd_ < 0)
         {
-            ec_ = GetLastSystemError();
             return false;
         }
 
-        struct sockaddr_un addr{};
-        createAddress(addr, path.c_str());
-
-        if (::bind(fd_, (struct sockaddr*)&addr, sizeof(addr)) < 0)
+        SetNonBlocking(fd_, true, ec);
+        if (ec)
         {
-            ec_ = GetLastSystemError();
-            ::close(fd_);
-            fd_ = -1;
+            closeSocket();
             return false;
         }
 
-        if (::listen(fd_, 128) < 0)
+        SocketAddrUnixType addr{};
+        if (!createAddress(addr, path.c_str(), ec))
         {
-            ec_ = GetLastSystemError();
-            ::close(fd_);
-            fd_ = -1;
+            closeSocket();
             return false;
         }
 
-        connected_ = true;
-        ec_.clear();
+        /// @todo: make wrapper.
+        if (::bind(fd_, (SocketAddrType*)&addr, sizeof(addr)) < 0)
+        {
+            ec = GetLastSystemError();
+            closeSocket();
+            return false;
+        }
+
+        /// @todo: make wrapper.
+        if (::listen(fd_, backlog) < 0)
+        {
+            ec = GetLastSystemError();
+            closeSocket();
+            return false;
+        }
+
+        ec.clear();
         return true;
     }
 
-    UnixSocket accept()
+    UnixSocket accept(std::error_code& ec)
     {
-        if (fd_ < 0)
+        if (!isValidImpl())
         {
+            SetSystemError(ec, std::errc::not_connected);
             return UnixSocket();
         }
 
-        int clientFd = ::accept(fd_, nullptr, nullptr);
+        SocketType clientFd = Accept(fd_, nullptr, nullptr, ec);
         if (clientFd < 0)
         {
-            ec_ = GetLastSystemError();
             return UnixSocket();
         }
 
-        int flags = fcntl(clientFd, F_GETFL, 0);
-        fcntl(clientFd, F_SETFL, flags | O_NONBLOCK);
+        SetNonBlocking(clientFd, true, ec);
+        if (ec)
+        {
+            return UnixSocket();
+        }
 
         UnixSocket client;
         client.fd_ = clientFd;
-        client.connected_ = true;
         client.isServer_ = false;
-        client.ec_.clear();
 
         return client;
     }
 
 private:
-    ssize_t sendImpl(const uint8_t* data, size_t length)
+    ssize_t sendImpl(const uint8_t* data, size_t length, std::error_code& ec)
     {
-        if (!connected_)
+        if (!isValidImpl())
         {
-            SetSystemError(ec_, std::errc::not_connected);
+            SetSystemError(ec, std::errc::bad_file_descriptor);
             return -1;
         }
 
         ssize_t n = ::send(fd_, data, length, MSG_NOSIGNAL);
         if (n < 0)
         {
-            ec_ = GetLastSystemError();
-            if (ec_ != std::errc::resource_unavailable_try_again)
-            {
-                connected_ = false;
-            }
+            ec = GetLastSystemError();
         }
         else
         {
-            ec_.clear();
+            ec.clear();
         }
 
         return n;
     }
 
-    ssize_t recvImpl(uint8_t* buffer, size_t len)
+    ssize_t recvImpl(uint8_t* buffer, size_t len, std::error_code& ec)
     {
-        if (!connected_)
+        if (!isValidImpl())
         {
-            SetSystemError(ec_, std::errc::not_connected);
+            SetSystemError(ec, std::errc::bad_file_descriptor);
             return -1;
         }
 
         ssize_t n = ::recv(fd_, buffer, len, MSG_DONTWAIT);
         if (n < 0)
         {
-            ec_ = GetLastSystemError();
-            if (ec_ != std::errc::resource_unavailable_try_again)
-            {
-                connected_ = false;
-            }
-        }
-        else if (n == 0)
-        {
-            SetSystemError(ec_, std::errc::connection_reset);
-            connected_ = false;
+            ec = GetLastSystemError();
         }
         else
         {
-            ec_.clear();
+            ec.clear();
         }
 
         return n;
     }
 
-    ssize_t sendmsgImpl(const struct msghdr* msg, int flags = 0)
+    ssize_t sendmsgImpl(const struct msghdr* msg, int flags, std::error_code& ec)
     {
-        if (!connected_)
+        if (!isValidImpl())
         {
-            SetSystemError(ec_, std::errc::not_connected);
+            SetSystemError(ec, std::errc::bad_file_descriptor);
             return -1;
         }
 
         ssize_t n = ::sendmsg(fd_, msg, flags | MSG_NOSIGNAL);
         if (n < 0)
         {
-            ec_ = GetLastSystemError();
-            if (ec_ != std::errc::resource_unavailable_try_again)
-            {
-                connected_ = false;
-            }
+            ec = GetLastSystemError();
         }
         else
         {
-            ec_.clear();
+            ec.clear();
         }
 
         return n;
     }
 
-    ssize_t recvmsgImpl(struct msghdr* msg, int flags = 0)
+    ssize_t recvmsgImpl(struct msghdr* msg, int flags, std::error_code& ec)
     {
-        if (!connected_)
+        if (!isValidImpl())
         {
-            SetSystemError(ec_, std::errc::not_connected);
+            SetSystemError(ec, std::errc::bad_file_descriptor);
             return -1;
         }
 
         ssize_t n = ::recvmsg(fd_, msg, flags | MSG_DONTWAIT);
         if (n < 0)
         {
-            ec_ = GetLastSystemError();
-            if (ec_ != std::errc::resource_unavailable_try_again)
-            {
-                connected_ = false;
-            }
-        }
-        else if (n == 0)
-        {
-            SetSystemError(ec_, std::errc::connection_reset);
-            connected_ = false;
+            ec = GetLastSystemError();
         }
         else
         {
-            ec_.clear();
+            ec.clear();
         }
 
         return n;
@@ -262,21 +258,9 @@ private:
         return fd_;
     }
 
-    const std::error_code& lastErrorImpl() const
-    {
-        return ec_;
-    }
-
     void closeImpl() noexcept
     {
-        if (fd_ >= 0)
-        {
-            ::close(fd_);
-            fd_ = -1;
-        }
-
-        connected_ = false;
-        ec_.clear();
+        closeSocket();
 
         if (isServer_ && !path_.empty())
         {
@@ -285,23 +269,30 @@ private:
         }
     }
 
-    inline int createSocket() noexcept
+    static inline bool createAddress(SocketAddrUnixType& addr, const char* path, std::error_code& ec)
     {
-        return ::socket(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK, 0);
+        if (strlen(path) >= sizeof(addr.sun_path))
+        {
+            SetSystemError(ec, std::errc::filename_too_long);
+            return false;
+        }
+        addr.sun_family = AF_UNIX;
+        strcpy(addr.sun_path, path);
+        return true;
     }
 
-    static inline void createAddress(sockaddr_un& addr, const char* path)
+    inline void closeSocket() noexcept
     {
-        addr.sun_family = AF_UNIX;
-        strncpy(addr.sun_path, path, sizeof(addr.sun_path) - 1);
-        addr.sun_path[sizeof(addr.sun_path) - 1] = '\0';
+        if (fd_ != g_InvalidSocket)
+        {
+            CloseSocket(fd_);
+            fd_ = g_InvalidSocket;
+        }
     }
 
 private:
     std::string path_;
-    std::error_code ec_;
-    int fd_{-1};
-    bool connected_{false};
+    SocketType fd_{g_InvalidSocket};
     bool isServer_{false};
 };
 
