@@ -31,7 +31,7 @@ typedef struct hostent HostEntry;
 
 inline SocketType CreateSocket(int domain, int socktype, int protocol, std::error_code& ec)
 {
-    SocketType sock = g_InvalidSocket;
+    SocketType sock;
 
     sock = ::socket(domain, socktype, protocol);
     if (sock == g_InvalidSocket)
@@ -50,11 +50,7 @@ inline void CloseSocket(SocketType sock)
 
 inline SocketType Connect(SocketType sock, const SocketAddrType* addr, SocketLengthType addrlen, std::error_code& ec)
 {
-    if (sock == g_InvalidSocket)
-    {
-        ec = std::make_error_code(std::errc::invalid_argument);
-        return g_InvalidSocket;
-    }
+    assert(sock != g_InvalidSocket);
 
     SocketType ret = ::connect(sock, addr, addrlen);
     if (ret == g_InvalidSocket)
@@ -65,13 +61,35 @@ inline SocketType Connect(SocketType sock, const SocketAddrType* addr, SocketLen
     return ret;
 }
 
+inline bool Bind(SocketType sock, const SocketAddrType* addr, SocketLengthType addrlen, std::error_code& ec)
+{
+    assert(sock != g_InvalidSocket);
+
+    if (0 > ::bind(sock, addr, addrlen))
+    {
+        ec = GetLastSystemError();
+        return false;
+    }
+
+    return true;
+}
+
+inline bool Listen(SocketType sock, int backlog, std::error_code& ec)
+{
+    assert(sock != g_InvalidSocket);
+
+    if (::listen(sock, backlog) < 0)
+    {
+        ec = GetLastSystemError();
+        return false;
+    }
+
+    return true;
+}
+
 inline SocketType Accept(SocketType sock, SocketAddrType* addr, SocketLengthType* addrlen, std::error_code& ec)
 {
-    if (sock == g_InvalidSocket)
-    {
-        ec = std::make_error_code(std::errc::invalid_argument);
-        return g_InvalidSocket;
-    }
+    assert(sock != g_InvalidSocket);
 
     SocketType ret = ::accept(sock, addr, addrlen);
     if (ret == g_InvalidSocket)
@@ -82,15 +100,11 @@ inline SocketType Accept(SocketType sock, SocketAddrType* addr, SocketLengthType
     return ret;
 }
 
-inline void SetNonBlocking(SocketType s, bool value, std::error_code& ec)
+inline void SetNonBlocking(SocketType sock, bool value, std::error_code& ec)
 {
-    if (s == g_InvalidSocket)
-    {
-        ec = std::make_error_code(std::errc::invalid_argument);
-        return;
-    }
+    assert(sock != g_InvalidSocket);
 
-    int ret = ::fcntl(s, F_GETFL, 0);
+    int ret = ::fcntl(sock, F_GETFL, 0);
     if (ret < 0)
     {
         ec = GetLastSystemError();
@@ -98,7 +112,7 @@ inline void SetNonBlocking(SocketType s, bool value, std::error_code& ec)
     else
     {
         int flag = (value ? (ret | O_NONBLOCK) : (ret & ~O_NONBLOCK));
-        ret = ::fcntl(s, F_SETFL, flag);
+        ret = ::fcntl(sock, F_SETFL, flag);
         if (ret < 0)
         {
             ec = GetLastSystemError();
@@ -106,13 +120,14 @@ inline void SetNonBlocking(SocketType s, bool value, std::error_code& ec)
     }
 }
 
-inline int GetSocketOption(SocketType s, int level, int optname, void* optval, size_t* optlen, std::error_code& ec)
+inline int GetSocketOption(SocketType sock, int level, int optname, void* optval, size_t* optlen, std::error_code& ec)
 {
+    assert(sock != g_InvalidSocket);
     assert(optlen != nullptr);
     assert(optval != nullptr);
 
     SocketLengthType tmpOptlen = static_cast<SocketLengthType>(*optlen);
-    int ret = ::getsockopt(s, level, optname, optval, &tmpOptlen);
+    int ret = ::getsockopt(sock, level, optname, optval, &tmpOptlen);
 
     if (ret == -1)
     {
@@ -127,13 +142,15 @@ inline int GetSocketOption(SocketType s, int level, int optname, void* optval, s
     return ret;
 }
 
-inline std::error_code GetSocketError(SocketType s)
+inline std::error_code GetSocketError(SocketType sock)
 {
+    assert(sock != g_InvalidSocket);
+
     std::error_code ec;
     int socketError = 0;
     size_t optlen = sizeof(socketError);
 
-    int ret = GetSocketOption(s, SOL_SOCKET, SO_ERROR, &socketError, &optlen, ec);
+    int ret = GetSocketOption(sock, SOL_SOCKET, SO_ERROR, &socketError, &optlen, ec);
     if (ret == -1)
     {
         return ec;

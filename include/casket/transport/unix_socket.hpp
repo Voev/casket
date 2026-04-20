@@ -5,7 +5,10 @@
 
 #include <casket/transport/socket_ops.hpp>
 #include <casket/transport/transport_base.hpp>
+#include <casket/transport/server_socket_path.hpp>
+
 #include <casket/utils/error_code.hpp>
+#include <casket/nonstd/optional.hpp>
 
 namespace casket
 {
@@ -27,9 +30,7 @@ public:
     UnixSocket& operator=(const UnixSocket&) = delete;
 
     UnixSocket(UnixSocket&& other) noexcept
-        : path_(std::move(other.path_))
-        , fd_(std::exchange(other.fd_, -1))
-        , isServer_(std::exchange(other.isServer_, false))
+        : fd_(std::exchange(other.fd_, g_InvalidSocket))
     {
     }
 
@@ -38,10 +39,7 @@ public:
         if (this != &other)
         {
             closeImpl();
-
-            path_ = std::move(other.path_);
-            fd_ = std::exchange(other.fd_, -1);
-            isServer_ = std::exchange(other.isServer_, false);
+            fd_ = std::exchange(other.fd_, g_InvalidSocket);
         }
         return *this;
     }
@@ -54,8 +52,6 @@ public:
             return false;
         }
 
-        path_ = path;
-
         fd_ = CreateSocket(AF_UNIX, SOCK_STREAM, 0, ec);
         if (fd_ < 0)
         {
@@ -65,27 +61,28 @@ public:
         SetNonBlocking(fd_, nonblock, ec);
         if (ec)
         {
-            closeSocket();
+            closeImpl();
             return false;
         }
 
         SocketAddrUnixType addr{};
         if (!createAddress(addr, path.c_str(), ec))
         {
-            closeSocket();
+            closeImpl();
             return false;
         }
 
         if (Connect(fd_, (SocketAddrType*)&addr, sizeof(addr), ec) < 0)
         {
-            closeSocket();
+            closeImpl();
             return false;
         }
 
         return true;
     }
 
-    bool listen(const std::string& path, int backlog, std::error_code& ec)
+    bool listen(std::string path, int backlog, std::error_code& ec,
+                ServerSocketPath::Flags flags = ServerSocketPath::Default)
     {
         if (path.empty())
         {
@@ -93,8 +90,11 @@ public:
             return false;
         }
 
-        path_ = path;
-        isServer_ = true;
+        auto socketPath = ServerSocketPath::create(std::move(path), flags, ec);
+        if (ec)
+        {
+            return false;
+        }
 
         fd_ = CreateSocket(AF_UNIX, SOCK_STREAM, 0, ec);
         if (fd_ < 0)
@@ -105,33 +105,30 @@ public:
         SetNonBlocking(fd_, true, ec);
         if (ec)
         {
-            closeSocket();
+            closeImpl();
             return false;
         }
 
         SocketAddrUnixType addr{};
-        if (!createAddress(addr, path.c_str(), ec))
+        if (!createAddress(addr, socketPath.toString().c_str(), ec))
         {
-            closeSocket();
+            closeImpl();
             return false;
         }
 
-        /// @todo: make wrapper.
-        if (::bind(fd_, (SocketAddrType*)&addr, sizeof(addr)) < 0)
+        if (!Bind(fd_, (SocketAddrType*)&addr, sizeof(addr), ec))
         {
-            ec = GetLastSystemError();
-            closeSocket();
+            closeImpl();
             return false;
         }
 
-        /// @todo: make wrapper.
-        if (::listen(fd_, backlog) < 0)
+        if (!Listen(fd_, backlog, ec))
         {
-            ec = GetLastSystemError();
-            closeSocket();
+            closeImpl();
             return false;
         }
 
+        socketPath_ = std::move(socketPath);
         ec.clear();
         return true;
     }
@@ -158,7 +155,6 @@ public:
 
         UnixSocket client;
         client.fd_ = clientFd;
-        client.isServer_ = false;
 
         return client;
     }
@@ -260,12 +256,10 @@ private:
 
     void closeImpl() noexcept
     {
-        closeSocket();
-
-        if (isServer_ && !path_.empty())
+        if (fd_ != g_InvalidSocket)
         {
-            ::unlink(path_.c_str());
-            path_.clear();
+            CloseSocket(fd_);
+            fd_ = g_InvalidSocket;
         }
     }
 
@@ -281,19 +275,9 @@ private:
         return true;
     }
 
-    inline void closeSocket() noexcept
-    {
-        if (fd_ != g_InvalidSocket)
-        {
-            CloseSocket(fd_);
-            fd_ = g_InvalidSocket;
-        }
-    }
-
 private:
-    std::string path_;
     SocketType fd_{g_InvalidSocket};
-    bool isServer_{false};
+    nonstd::optional<ServerSocketPath> socketPath_;
 };
 
 } // namespace casket
