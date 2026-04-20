@@ -38,7 +38,8 @@ public:
 
     bool connect()
     {
-        return socket_.connect(socketPath_);
+        std::error_code ec{};
+        return socket_.connect(socketPath_, true, ec);
     }
 
     void close()
@@ -59,7 +60,8 @@ public:
                 return false;
         }
 
-        ssize_t sent = socket_.send(message_.data(), message_.size());
+        std::error_code ec{};
+        ssize_t sent = socket_.send(message_.data(), message_.size(), ec);
         if (sent != static_cast<ssize_t>(message_.size()))
         {
             socket_.close();
@@ -81,7 +83,7 @@ public:
                 return false;
             }
 
-            ssize_t received = socket_.recv(buffer, sizeof(buffer));
+            ssize_t received = socket_.recv(buffer, sizeof(buffer), ec);
             if (received > 0)
             {
                 response.write(buffer, received);

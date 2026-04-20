@@ -159,16 +159,17 @@ public:
         stop();
     }
 
-    bool listen(const std::string& address, int port = 0)
+    bool listen(const std::string& address, int port, int backlog, std::error_code& ec)
     {
         if constexpr (std::is_same_v<Transport, UnixSocket>)
         {
-            return listenTransport_.listen(address);
+            return listenTransport_.listen(address, backlog, ec);
         }
         else if constexpr (std::is_same_v<Transport, TcpSocket>)
         {
             return listenTransport_.listen(port, address);
         }
+
         return false;
     }
 
@@ -406,13 +407,14 @@ private:
 
     void acceptNewClient()
     {
-        auto clientTransport = std::make_unique<Transport>(listenTransport_.accept());
+        std::error_code ec{};
+        auto clientTransport = std::make_unique<Transport>(listenTransport_.accept(ec));
 
         if (!clientTransport->isValid())
         {
             if (errorHandler_)
             {
-                errorHandler_(clientTransport->lastError());
+                errorHandler_(ec);
             }
             if (config_.enableStatistics)
             {
@@ -441,7 +443,7 @@ private:
         auto ctx =
             std::make_unique<ClientContext>(std::move(clientTransport), std::move(readBuffer), std::move(writeBuffer));
 
-        std::error_code ec;
+        ec.clear();
         EventType events = EventType::Readable | EventType::HangUp | EventType::EdgeTriggered;
         poller_->add(static_cast<void*>(ctx.get()), clientFd, events, ec);
 
@@ -574,7 +576,8 @@ private:
         msg.msg_iov = iov;
         msg.msg_iovlen = iovcnt;
 
-        ssize_t received = ctx->transport->recvmsg(&msg, 0);
+        std::error_code ec{};
+        ssize_t received = ctx->transport->recvmsg(&msg, 0, ec);
 
         if (received > 0)
         {
@@ -584,7 +587,7 @@ private:
         }
         else if (received < 0)
         {
-            if (ctx->transport->lastError() != std::errc::resource_unavailable_try_again)
+            if (ec != std::errc::resource_unavailable_try_again)
             {
                 removeClient(ctx->getFd());
             }
@@ -616,7 +619,8 @@ private:
             msg.msg_iov = iov;
             msg.msg_iovlen = iovcnt;
 
-            ssize_t sent = ctx->transport->sendmsg(&msg, 0);
+            std::error_code ec{};
+            ssize_t sent = ctx->transport->sendmsg(&msg, 0, ec);
 
             if (sent > 0)
             {
@@ -625,7 +629,7 @@ private:
             }
             else if (sent < 0)
             {
-                if (ctx->transport->lastError() == std::errc::resource_unavailable_try_again)
+                if (ec == std::errc::resource_unavailable_try_again)
                 {
                     ctx->isWriting = false;
                     updateClientEvents(ctx);

@@ -3,9 +3,10 @@
 #include <cerrno>
 #include <cstdint>
 #include <system_error>
-#include <sys/uio.h>
 
-#include <iostream>
+#include <sys/uio.h>
+#include <sys/types.h>
+
 
 namespace casket
 {
@@ -14,34 +15,29 @@ template <typename Derived>
 class TransportBase
 {
 public:
-    ssize_t send(const uint8_t* data, size_t length)
+    ssize_t send(const uint8_t* data, size_t length, std::error_code& ec) noexcept
     {
-        return derived().sendImpl(data, length);
+        return derived().sendImpl(data, length, ec);
     }
 
-    ssize_t recv(uint8_t* buffer, size_t length)
+    ssize_t recv(uint8_t* buffer, size_t length, std::error_code& ec) noexcept
     {
-        return derived().recvImpl(buffer, length);
+        return derived().recvImpl(buffer, length, ec);
     }
 
-    ssize_t sendmsg(const struct msghdr* msg, int flags = 0)
+    ssize_t sendmsg(const struct msghdr* msg, int flags, std::error_code& ec) noexcept
     {
-        return derived().sendmsgImpl(msg, flags);
+        return derived().sendmsgImpl(msg, flags, ec);
     }
 
-    ssize_t recvmsg(struct msghdr* msg, int flags = 0)
+    ssize_t recvmsg(struct msghdr* msg, int flags, std::error_code& ec) noexcept
     {
-        return derived().recvmsgImpl(msg, flags);
+        return derived().recvmsgImpl(msg, flags, ec);
     }
 
     bool isValid() const
     {
         return derived().isValidImpl();
-    }
-
-    const std::error_code& lastError() const
-    {
-        return derived().lastErrorImpl();
     }
 
     int getFd() const

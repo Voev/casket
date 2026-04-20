@@ -43,16 +43,16 @@ int main()
                                       interrupted = true;
                                   });
 
-    if (!server.listen("/tmp/echo_server"))
+    std::error_code ec{};
+    if (!server.listen("/tmp/echo_server", -1, 128, ec))
     {
-        std::cerr << "Failed to listen" << std::endl;
+        std::cerr << "Failed to listen: " << ec.message() << std::endl;
         return 1;
     }
 
     server.start();
     std::cout << "Server running in main thread" << std::endl;
 
-    std::error_code ec{};
     while (!interrupted)
     {
         if (!server.step())
