@@ -3,10 +3,11 @@
 #include <cerrno>
 #include <cstdint>
 #include <system_error>
+#include <chrono>
 
 #include <sys/uio.h>
 #include <sys/types.h>
-
+#include <sys/socket.h>
 
 namespace casket
 {
@@ -48,6 +49,11 @@ public:
     void close() noexcept
     {
         derived().closeImpl();
+    }
+
+    bool isConnected(std::chrono::milliseconds timeout, std::error_code& ec) noexcept
+    {
+        return derived().isConnectedImpl(timeout, ec);
     }
 
 private:

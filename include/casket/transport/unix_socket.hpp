@@ -3,9 +3,10 @@
 #include <utility>
 #include <system_error>
 
-#include <casket/transport/socket_ops.hpp>
 #include <casket/transport/transport_base.hpp>
+#include <casket/transport/socket_ops.hpp>
 #include <casket/transport/server_socket_path.hpp>
+#include <casket/transport/select.hpp>
 
 #include <casket/utils/error_code.hpp>
 #include <casket/nonstd/optional.hpp>
@@ -31,6 +32,8 @@ public:
 
     UnixSocket(UnixSocket&& other) noexcept
         : fd_(std::exchange(other.fd_, g_InvalidSocket))
+        , isNonBlocking_(std::exchange(other.isNonBlocking_, false))
+    
     {
     }
 
@@ -40,12 +43,16 @@ public:
         {
             closeImpl();
             fd_ = std::exchange(other.fd_, g_InvalidSocket);
+            isNonBlocking_ = std::exchange(other.isNonBlocking_, false);
+    
         }
         return *this;
     }
 
     bool connect(const std::string& path, const bool nonblock, std::error_code& ec)
     {
+        isNonBlocking_ = nonblock;
+
         if (path.empty())
         {
             SetSystemError(ec, std::errc::invalid_argument);
@@ -74,6 +81,11 @@ public:
 
         if (Connect(fd_, (SocketAddrType*)&addr, sizeof(addr), ec) < 0)
         {
+            if (isNonBlocking_ && ec == std::errc::operation_in_progress)
+            {
+                ec.clear();
+                return true;
+            }
             closeImpl();
             return false;
         }
@@ -102,6 +114,7 @@ public:
             return false;
         }
 
+        isNonBlocking_ = true;
         SetNonBlocking(fd_, true, ec);
         if (ec)
         {
@@ -155,16 +168,17 @@ public:
 
         UnixSocket client;
         client.fd_ = clientFd;
+        client.isNonBlocking_ = true;
 
         return client;
     }
 
 private:
-    ssize_t sendImpl(const uint8_t* data, size_t length, std::error_code& ec)
+    ssize_t sendImpl(const uint8_t* data, size_t length, std::error_code& ec) noexcept
     {
         if (!isValidImpl())
         {
-            SetSystemError(ec, std::errc::bad_file_descriptor);
+            SetSystemError(ec, std::errc::not_connected);
             return -1;
         }
 
@@ -172,6 +186,11 @@ private:
         if (n < 0)
         {
             ec = GetLastSystemError();
+            if (isNonBlocking_ &&
+                (ec == std::errc::resource_unavailable_try_again || ec == std::errc::operation_would_block))
+            {
+                return 0;
+            }
         }
         else
         {
@@ -181,18 +200,25 @@ private:
         return n;
     }
 
-    ssize_t recvImpl(uint8_t* buffer, size_t len, std::error_code& ec)
+        ssize_t recvImpl(uint8_t* buffer, size_t len, std::error_code& ec)
     {
         if (!isValidImpl())
         {
-            SetSystemError(ec, std::errc::bad_file_descriptor);
+            SetSystemError(ec, std::errc::not_connected);
             return -1;
         }
 
-        ssize_t n = ::recv(fd_, buffer, len, MSG_DONTWAIT);
+        int flags = isNonBlocking_ ? MSG_DONTWAIT : 0;
+        ssize_t n = ::recv(fd_, buffer, len, flags);
+
         if (n < 0)
         {
             ec = GetLastSystemError();
+            if (isNonBlocking_ &&
+                (ec == std::errc::resource_unavailable_try_again || ec == std::errc::operation_would_block))
+            {
+                return 0;
+            }
         }
         else
         {
@@ -206,7 +232,7 @@ private:
     {
         if (!isValidImpl())
         {
-            SetSystemError(ec, std::errc::bad_file_descriptor);
+            SetSystemError(ec, std::errc::not_connected);
             return -1;
         }
 
@@ -214,6 +240,11 @@ private:
         if (n < 0)
         {
             ec = GetLastSystemError();
+            if (isNonBlocking_ &&
+                (ec == std::errc::resource_unavailable_try_again || ec == std::errc::operation_would_block))
+            {
+                return 0;
+            }
         }
         else
         {
@@ -227,14 +258,25 @@ private:
     {
         if (!isValidImpl())
         {
-            SetSystemError(ec, std::errc::bad_file_descriptor);
+            SetSystemError(ec, std::errc::not_connected);
             return -1;
         }
 
-        ssize_t n = ::recvmsg(fd_, msg, flags | MSG_DONTWAIT);
+        int actualFlags = flags;
+        if (isNonBlocking_)
+        {
+            actualFlags |= MSG_DONTWAIT;
+        }
+
+        ssize_t n = ::recvmsg(fd_, msg, actualFlags);
         if (n < 0)
         {
             ec = GetLastSystemError();
+            if (isNonBlocking_ &&
+                (ec == std::errc::resource_unavailable_try_again || ec == std::errc::operation_would_block))
+            {
+                return 0;
+            }
         }
         else
         {
@@ -242,6 +284,30 @@ private:
         }
 
         return n;
+    }
+
+    bool isConnectedImpl(std::chrono::milliseconds timeout, std::error_code& ec) noexcept
+    {
+        if (!isValidImpl())
+        {
+            SetSystemError(ec, std::errc::not_connected);
+            return false;
+        }
+
+        if (!isNonBlocking_)
+        {
+            ec.clear();
+            return true;
+        }
+
+        WaitSocket(fd_, false, timeout, ec);
+        if (ec)
+        {
+            return false;
+        }
+
+        ec = GetSocketError(fd_);
+        return !ec;
     }
 
     bool isValidImpl() const
@@ -277,6 +343,7 @@ private:
 
 private:
     SocketType fd_{g_InvalidSocket};
+    bool isNonBlocking_{false};
     nonstd::optional<ServerSocketPath> socketPath_;
 };
 
