@@ -120,6 +120,16 @@ inline void SetNonBlocking(SocketType sock, bool value, std::error_code& ec)
     }
 }
 
+inline int SetSocketOption(SocketType s, int level, int optname, void* optval, size_t optlen, std::error_code& ec)
+{
+    int ret = ::setsockopt(s, level, optname, optval, static_cast<SocketLengthType>(optlen));
+    if (ret == -1)
+    {
+        ec = GetLastSystemError();
+    }
+    return ret;
+}
+
 inline int GetSocketOption(SocketType sock, int level, int optname, void* optval, size_t* optlen, std::error_code& ec)
 {
     assert(sock != g_InvalidSocket);
@@ -132,10 +142,6 @@ inline int GetSocketOption(SocketType sock, int level, int optname, void* optval
     if (ret == -1)
     {
         ec = GetLastSystemError();
-    }
-    else
-    {
-        ec.clear();
     }
 
     *optlen = static_cast<std::size_t>(tmpOptlen);

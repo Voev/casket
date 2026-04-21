@@ -133,8 +133,8 @@ TEST_F(UnixSocketTest, SendEmptyMessage)
 
     uint8_t buffer[256];
     ssize_t received = clientSocket.recv(buffer, sizeof(buffer), ec);
-    EXPECT_EQ(received, -1);
-    EXPECT_EQ(ec, std::errc::resource_unavailable_try_again);
+    EXPECT_EQ(ec, std::errc::resource_unavailable_try_again) << ec.message();
+    EXPECT_EQ(received, 0);
 }
 
 TEST_F(UnixSocketTest, RecvWithSmallBuffer)
@@ -182,8 +182,8 @@ TEST_F(UnixSocketTest, RecvReturnsWouldBlockWhenNoData)
     uint8_t buffer[256];
     ssize_t received = clientSocket.recv(buffer, sizeof(buffer), ec);
 
-    EXPECT_EQ(received, -1);
-    EXPECT_EQ(ec, std::errc::resource_unavailable_try_again);
+    EXPECT_EQ(ec, std::errc::resource_unavailable_try_again) << ec.message();
+    EXPECT_EQ(received, 0);
 }
 
 TEST_F(UnixSocketTest, ServerListenAndAccept)
@@ -218,7 +218,7 @@ TEST_F(UnixSocketTest, AcceptWithoutClient)
 
     EXPECT_FALSE(clientSocket.isValid());
     EXPECT_EQ(clientSocket.getFd(), -1);
-    // В неблокирующем режиме accept вернёт ошибку EAGAIN/EWOULDBLOCK
+
     EXPECT_TRUE(ec == std::errc::resource_unavailable_try_again || ec.value() != 0);
 }
 
@@ -272,7 +272,7 @@ TEST_F(UnixSocketTest, CloseConnection)
     ssize_t sent = client.send(data, sizeof(data), ec);
 
     EXPECT_EQ(sent, -1);
-    EXPECT_EQ(ec, std::errc::bad_file_descriptor);
+    EXPECT_EQ(ec, std::errc::not_connected);
 }
 
 TEST_F(UnixSocketTest, ServerCleanupSocketFile)
@@ -287,7 +287,7 @@ TEST_F(UnixSocketTest, ServerCleanupSocketFile)
 
         struct stat st;
         EXPECT_EQ(stat(socketPath.c_str(), &st), 0);
-    } // server уничтожается здесь, файл сокета должен быть удалён
+    }
 
     struct stat st;
     EXPECT_NE(stat(socketPath.c_str(), &st), 0);
@@ -377,7 +377,7 @@ TEST_F(UnixSocketTest, ErrorCodeAfterFailedOperation)
     ssize_t sent = socket.send(data, sizeof(data), ec);
 
     EXPECT_EQ(sent, -1);
-    EXPECT_EQ(ec, std::errc::bad_file_descriptor);
+    EXPECT_EQ(ec, std::errc::not_connected);
 }
 
 TEST_F(UnixSocketTest, ErrorCodeAfterFailedAccept)
@@ -398,7 +398,6 @@ TEST_F(UnixSocketTest, NonBlockingMode)
     ASSERT_FALSE(ec);
 
     UnixSocket client;
-    // Подключаемся в неблокирующем режиме
     ASSERT_TRUE(client.connect(socketPath_, true, ec));
     ASSERT_FALSE(ec);
 
@@ -406,11 +405,10 @@ TEST_F(UnixSocketTest, NonBlockingMode)
     ASSERT_TRUE(clientSocket.isValid());
     ASSERT_FALSE(ec);
 
-    // Попытка чтения без данных должна вернуть would_block
     uint8_t buffer[256];
     ssize_t received = clientSocket.recv(buffer, sizeof(buffer), ec);
 
-    EXPECT_EQ(received, -1);
+    EXPECT_EQ(received, 0);
     EXPECT_EQ(ec, std::errc::resource_unavailable_try_again);
 }
 
@@ -424,13 +422,11 @@ TEST_F(UnixSocketTest, MoveSemantics)
     int originalFd = server1.getFd();
     EXPECT_NE(originalFd, -1);
 
-    // Перемещение
     UnixSocket server2 = std::move(server1);
     EXPECT_EQ(server2.getFd(), originalFd);
     EXPECT_EQ(server1.getFd(), -1);
     EXPECT_FALSE(server1.isValid());
 
-    // Перемещение через присваивание
     UnixSocket server3;
     server3 = std::move(server2);
     EXPECT_EQ(server3.getFd(), originalFd);
