@@ -190,6 +190,16 @@ public:
         return PackResult<Packer*>(this);
     }
 
+    PackResult<Packer*> pack(const char* str)
+    {
+        return pack(nonstd::string_view(str));
+    }
+
+    PackResult<Packer*> pack(const std::string& str)
+    {
+        return pack(nonstd::string_view(str));
+    }
+
     PackResult<Packer*> pack(nonstd::string_view str)
     {
         size_t len = str.size();
@@ -256,12 +266,6 @@ public:
             writeInteger(static_cast<uint32_t>(size));
         }
         return PackResult<Packer*>(this);
-    }
-
-    template <typename T>
-    PackResult<Packer*> pack(T&& value)
-    {
-        return pack(std::forward<T>(value));
     }
 };
 
