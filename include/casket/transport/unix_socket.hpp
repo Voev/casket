@@ -79,7 +79,7 @@ public:
             return false;
         }
 
-        if (Connect(fd_, (SocketAddrType*)&addr, sizeof(addr), ec) < 0)
+        if (Connect(fd_, (SocketAddrType*)&addr, SUN_LEN(&addr), ec) < 0)
         {
             if (isNonBlocking_ && ec == std::errc::operation_in_progress)
             {

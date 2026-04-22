@@ -10,6 +10,7 @@
 #include <iostream>
 #include <iomanip>
 #include <sstream>
+#include <cassert>
 
 #include <casket/transport/transport_base.hpp>
 #include <casket/transport/unix_socket.hpp>
@@ -17,7 +18,7 @@
 
 #include <casket/multiplexing/epoll_poller.hpp>
 #include <casket/types/byte_buffer.hpp>
-#include <casket/types/pooled_queue.hpp>
+#include <casket/types/lru_cache.hpp>
 
 namespace casket
 {
@@ -32,6 +33,8 @@ struct ServerStatistics
     std::atomic<uint64_t> totalMessagesProcessed{0};
     std::atomic<uint64_t> totalErrors{0};
     std::atomic<uint64_t> peakConnections{0};
+    std::atomic<uint64_t> cacheHits{0};
+    std::atomic<uint64_t> cacheMisses{0};
     std::chrono::steady_clock::time_point startTime;
 
     void reset()
@@ -44,6 +47,8 @@ struct ServerStatistics
         totalMessagesProcessed = 0;
         totalErrors = 0;
         peakConnections = 0;
+        cacheHits = 0;
+        cacheMisses = 0;
         startTime = std::chrono::steady_clock::now();
     }
 
@@ -83,6 +88,24 @@ struct ServerStatistics
         ++totalErrors;
     }
 
+    void recordCacheHit()
+    {
+        ++cacheHits;
+    }
+
+    void recordCacheMiss()
+    {
+        ++cacheMisses;
+    }
+
+    double getCacheHitRate() const
+    {
+        uint64_t hits = cacheHits.load();
+        uint64_t misses = cacheMisses.load();
+        uint64_t total = hits + misses;
+        return total > 0 ? static_cast<double>(hits) / total : 0.0;
+    }
+
     double getUptimeSeconds() const
     {
         auto now = std::chrono::steady_clock::now();
@@ -115,6 +138,9 @@ struct ServerStatistics
            << received / (1024.0 * 1024.0) << " MB)\n"
            << "Total bytes sent: " << sent << " (" << sent / (1024.0 * 1024.0) << " MB)\n"
            << "Total errors: " << totalErrors.load() << "\n"
+           << "Cache hit rate: " << std::fixed << std::setprecision(2) << (getCacheHitRate() * 100) << "%\n"
+           << "Cache hits: " << cacheHits.load() << "\n"
+           << "Cache misses: " << cacheMisses.load() << "\n"
            << "\nPerformance metrics:\n"
            << "  Messages/sec: " << std::setprecision(0) << (uptime > 0 ? messages / uptime : 0) << " msg/s\n"
            << "  Throughput (recv): " << std::setprecision(2) << (uptime > 0 ? received / (uptime * 1024 * 1024) : 0)
@@ -125,6 +151,17 @@ struct ServerStatistics
     }
 };
 
+struct GenericServerConfig
+{
+    size_t byteBufferSize{8192};
+    size_t contextPoolSize{1024};
+    std::chrono::seconds idleTimeout{10};
+    std::chrono::seconds cacheTTL{60};
+    int maxEvents{64};
+    int waitTimeoutMs{100};
+    bool enableStatistics{true};
+};
+
 template <typename Transport>
 class GenericServer
 {
@@ -133,21 +170,13 @@ public:
     using ErrorHandler = std::function<void(const std::error_code&)>;
     using StatisticsHandler = std::function<void(const ServerStatistics&)>;
 
-    struct Config
-    {
-        size_t bufferSize{8192};
-        size_t bufferPoolSize{1024};
-        std::chrono::seconds idleTimeout{10};
-        int maxEvents{64};
-        int waitTimeoutMs{100};
-        bool enableStatistics{true};
-    };
-
-    explicit GenericServer(const Config& config = Config{})
+    explicit GenericServer(const GenericServerConfig& config = GenericServerConfig{})
         : config_(config)
-        , freeReadBuffers_(config_.bufferPoolSize)
-        , freeWriteBuffers_(config_.bufferPoolSize)
+        , activeHead_(nullptr)
+        , activeTail_(nullptr)
     {
+        contextCache_ = std::make_unique<LruCache<SocketType, ClientContext>>(config_.contextPoolSize);
+
         if (config_.enableStatistics)
         {
             statistics_.reset();
@@ -169,7 +198,6 @@ public:
         {
             return listenTransport_.listen(port, address);
         }
-
         return false;
     }
 
@@ -252,10 +280,6 @@ public:
                 auto* ctx = static_cast<ClientContext*>(event.userData);
                 handleClientEvents(ctx, event.revents);
             }
-            else
-            {
-                handleClientData(event.fd, event.revents);
-            }
         }
 
         cleanupIdleConnections();
@@ -286,19 +310,23 @@ public:
             poller_.reset();
         }
 
-        for (auto& [fd, client] : clients_)
+        ClientContext* ctx = activeHead_;
+        while (ctx)
         {
-            if (client->readBuffer)
+            if (ctx->transport)
             {
-                releaseReadBuffer(std::move(client->readBuffer));
+                ctx->transport->close();
             }
-            if (client->writeBuffer)
-            {
-                releaseWriteBuffer(std::move(client->writeBuffer));
-            }
-            client->transport->close();
+            ctx = ctx->activeNext;
         }
-        clients_.clear();
+
+        if (contextCache_)
+        {
+            contextCache_->clear();
+        }
+
+        activeHead_ = nullptr;
+        activeTail_ = nullptr;
 
         listenTransport_.close();
         initialized_ = false;
@@ -311,19 +339,14 @@ public:
 
     size_t getClientCount() const
     {
-        return clients_.size();
-    }
-
-    void printPeriodicStats(std::chrono::seconds interval, std::ostream& os = std::cout)
-    {
-        static auto lastPrint = std::chrono::steady_clock::now();
-        auto now = std::chrono::steady_clock::now();
-
-        if (now - lastPrint >= interval)
+        size_t count = 0;
+        ClientContext* ctx = activeHead_;
+        while (ctx)
         {
-            statistics_.print(os);
-            lastPrint = now;
+            ++count;
+            ctx = ctx->activeNext;
         }
+        return count;
     }
 
 private:
@@ -339,6 +362,11 @@ private:
         uint64_t bytesSent{0};
         uint64_t messagesProcessed{0};
 
+        ClientContext* activePrev{nullptr};
+        ClientContext* activeNext{nullptr};
+
+        ClientContext() = default;
+
         ClientContext(std::unique_ptr<Transport> t, std::unique_ptr<ByteBuffer> readBuf,
                       std::unique_ptr<ByteBuffer> writeBuf)
             : transport(std::move(t))
@@ -346,10 +374,6 @@ private:
             , writeBuffer(std::move(writeBuf))
             , lastActivity(std::chrono::steady_clock::now())
             , isWriting(false)
-        {
-        }
-
-        ~ClientContext() noexcept
         {
         }
 
@@ -366,6 +390,11 @@ private:
         void updateActivity()
         {
             lastActivity = std::chrono::steady_clock::now();
+        }
+
+        bool isActive() const
+        {
+            return transport != nullptr;
         }
     };
 
@@ -405,6 +434,34 @@ private:
         return true;
     }
 
+    void addToActive(ClientContext* ctx)
+    {
+        ctx->activePrev = nullptr;
+        ctx->activeNext = activeHead_;
+
+        if (activeHead_)
+            activeHead_->activePrev = ctx;
+        activeHead_ = ctx;
+
+        if (!activeTail_)
+            activeTail_ = ctx;
+    }
+
+    void removeFromActive(ClientContext* ctx)
+    {
+        if (ctx->activePrev)
+            ctx->activePrev->activeNext = ctx->activeNext;
+        else
+            activeHead_ = ctx->activeNext;
+
+        if (ctx->activeNext)
+            ctx->activeNext->activePrev = ctx->activePrev;
+        else
+            activeTail_ = ctx->activePrev;
+
+        ctx->activePrev = ctx->activeNext = nullptr;
+    }
+
     void acceptNewClient()
     {
         std::error_code ec{};
@@ -423,10 +480,33 @@ private:
             return;
         }
 
-        auto readBuffer = acquireReadBuffer();
-        auto writeBuffer = acquireWriteBuffer();
+        int clientFd = clientTransport->getFd();
 
-        if (!readBuffer || !writeBuffer)
+        ClientContext* ctx = contextCache_->get(clientFd);
+        if (ctx)
+        {
+            statistics_.recordCacheHit();
+
+            ctx->transport = std::move(clientTransport);
+
+            ctx->readBuffer->clear();
+            ctx->writeBuffer->clear();
+            ctx->isWriting = false;
+            ctx->bytesReceived = 0;
+            ctx->bytesSent = 0;
+            ctx->messagesProcessed = 0;
+            ctx->updateActivity();
+        }
+        else
+        {
+            statistics_.recordCacheMiss();
+
+            ctx = contextCache_->put(clientFd, std::move(clientTransport),
+                                     std::make_unique<ByteBuffer>(config_.byteBufferSize),
+                                     std::make_unique<ByteBuffer>(config_.byteBufferSize));
+        }
+
+        if (!ctx)
         {
             if (errorHandler_)
             {
@@ -439,13 +519,11 @@ private:
             return;
         }
 
-        int clientFd = clientTransport->getFd();
-        auto ctx =
-            std::make_unique<ClientContext>(std::move(clientTransport), std::move(readBuffer), std::move(writeBuffer));
+        addToActive(ctx);
 
         ec.clear();
         EventType events = EventType::Readable | EventType::HangUp | EventType::EdgeTriggered;
-        poller_->add(static_cast<void*>(ctx.get()), clientFd, events, ec);
+        poller_->add(static_cast<void*>(ctx), clientFd, events, ec);
 
         if (ec)
         {
@@ -457,12 +535,13 @@ private:
             {
                 statistics_.recordError();
             }
-            releaseReadBuffer(std::move(ctx->readBuffer));
-            releaseWriteBuffer(std::move(ctx->writeBuffer));
+            removeFromActive(ctx);
+            if (contextCache_)
+            {
+                contextCache_->release(clientFd);
+            }
             return;
         }
-
-        clients_[clientFd] = std::move(ctx);
 
         if (config_.enableStatistics)
         {
@@ -508,7 +587,6 @@ private:
 
             connectionHandler_(*ctx->readBuffer, *ctx->writeBuffer);
 
-            // If the handler hasn't read anything, we exit
             if (ctx->readBuffer->readPos() == oldReadPos)
             {
                 break;
@@ -528,7 +606,6 @@ private:
                 statistics_.recordMessage();
             }
 
-            // Sending a reply
             if (ctx->writeBuffer->availableRead() > 0)
             {
                 flushWriteBuffer(ctx);
@@ -559,7 +636,6 @@ private:
 
         if (!ctx->transport)
         {
-            /// Already closed
             return;
         }
 
@@ -592,7 +668,7 @@ private:
                 removeClient(ctx->getFd());
             }
         }
-        else // received == 0
+        else
         {
             removeClient(ctx->getFd());
         }
@@ -649,6 +725,7 @@ private:
 
         ctx->writeBuffer->clear();
         ctx->isWriting = false;
+        updateClientEvents(ctx);
     }
 
     void handleClientWrite(ClientContext* ctx)
@@ -664,86 +741,50 @@ private:
         }
     }
 
-    void handleClientData(int fd, EventType revents)
-    {
-        auto it = clients_.find(fd);
-        if (it == clients_.end())
-        {
-            return;
-        }
-
-        ClientContext* ctx = it->second.get();
-        if (!ctx)
-        {
-            return;
-        }
-
-        handleClientEvents(ctx, revents);
-    }
-
     void removeClient(int fd)
     {
-        auto it = clients_.find(fd);
-        if (it != clients_.end())
+        if (!contextCache_)
+            return;
+
+        ClientContext* ctx = contextCache_->get(fd);
+        if (!ctx || !ctx->isActive())
+            return;
+
+        if (poller_)
         {
-            if (poller_)
-            {
-                std::error_code ec;
-                poller_->remove(fd, ec);
-            }
+            std::error_code ec;
+            poller_->remove(fd, ec);
+        }
 
-            if (it->second->readBuffer)
-            {
-                releaseReadBuffer(std::move(it->second->readBuffer));
-            }
-            if (it->second->writeBuffer)
-            {
-                releaseWriteBuffer(std::move(it->second->writeBuffer));
-            }
+        if (ctx->transport)
+        {
+            ctx->transport->close();
+            ctx->transport = nullptr;
+        }
 
-            clients_.erase(it);
+        removeFromActive(ctx);
 
-            if (config_.enableStatistics)
-            {
-                statistics_.recordDisconnection();
-            }
+        contextCache_->release(fd);
+
+        if (config_.enableStatistics)
+        {
+            statistics_.recordDisconnection();
         }
     }
 
     void cleanupIdleConnections()
     {
         auto now = std::chrono::steady_clock::now();
+        ClientContext* ctx = activeHead_;
 
-        for (auto it = clients_.begin(); it != clients_.end();)
+        while (ctx)
         {
-            if (now - it->second->lastActivity > config_.idleTimeout)
+            ClientContext* next = ctx->activeNext;
+            if (now - ctx->lastActivity > config_.idleTimeout)
             {
-                if (poller_)
-                {
-                    std::error_code ec;
-                    poller_->remove(it->first, ec);
-                }
-
-                if (it->second->readBuffer)
-                {
-                    releaseReadBuffer(std::move(it->second->readBuffer));
-                }
-                if (it->second->writeBuffer)
-                {
-                    releaseWriteBuffer(std::move(it->second->writeBuffer));
-                }
-
-                it = clients_.erase(it);
-
-                if (config_.enableStatistics)
-                {
-                    statistics_.recordDisconnection();
-                }
+                removeClient(ctx->getFd());
             }
-            else
-            {
-                ++it;
-            }
+            ctx = next;
         }
     }
 
@@ -770,48 +811,8 @@ private:
         }
     }
 
-    std::unique_ptr<ByteBuffer> acquireReadBuffer()
-    {
-        std::unique_ptr<ByteBuffer> buffer;
-        if (freeReadBuffers_.pop(buffer))
-        {
-            buffer->clear();
-            return buffer;
-        }
-        return std::make_unique<ByteBuffer>(config_.bufferSize);
-    }
-
-    void releaseReadBuffer(std::unique_ptr<ByteBuffer> buffer)
-    {
-        if (buffer)
-        {
-            buffer->clear();
-            freeReadBuffers_.push(std::move(buffer));
-        }
-    }
-
-    std::unique_ptr<ByteBuffer> acquireWriteBuffer()
-    {
-        std::unique_ptr<ByteBuffer> buffer;
-        if (freeWriteBuffers_.pop(buffer))
-        {
-            buffer->clear();
-            return buffer;
-        }
-        return std::make_unique<ByteBuffer>(config_.bufferSize);
-    }
-
-    void releaseWriteBuffer(std::unique_ptr<ByteBuffer> buffer)
-    {
-        if (buffer)
-        {
-            buffer->clear();
-            freeWriteBuffers_.push(std::move(buffer));
-        }
-    }
-
 private:
-    Config config_;
+    GenericServerConfig config_;
     Transport listenTransport_;
     ConnectionHandler connectionHandler_;
     ErrorHandler errorHandler_;
@@ -820,13 +821,13 @@ private:
     std::unique_ptr<EpollPoller> poller_;
     std::vector<PollEvent> events_;
 
-    StrictPooledQueue<std::unique_ptr<ByteBuffer>> freeReadBuffers_;
-    StrictPooledQueue<std::unique_ptr<ByteBuffer>> freeWriteBuffers_;
+    std::unique_ptr<LruCache<SocketType, ClientContext>> contextCache_;
 
-    std::atomic<bool> running_{false};
+    ClientContext* activeHead_;
+    ClientContext* activeTail_;
+
+    std::atomic_bool running_{false};
     bool initialized_{false};
-
-    std::unordered_map<int, std::unique_ptr<ClientContext>> clients_;
 
     ServerStatistics statistics_;
 };

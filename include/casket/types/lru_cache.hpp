@@ -1,237 +1,290 @@
 #pragma once
-
-#include <casket/nonstd/string_view.hpp>
-#include <casket/nonstd/optional.hpp>
-#include <unordered_map>
-#include <memory>
-#include <functional>
-#include <casket/types/intrusive_list.hpp>
-#include <casket/memory/object_pool.hpp>
+#include <array>
+#include <cstddef>
+#include <cassert>
+#include <casket/types/node_pool.hpp>
 
 namespace casket
 {
 
-template <typename KeyType, typename ValueType>
-class LRUCache
+/// @brief LRU (least recently used) cache.
+///
+/// @tparam Key Type of cache key.
+/// @tparam Value Type of cached value.
+/// @tparam HASH_TABLE_SIZE Hash table buckets count.
+///
+template <typename Key, typename Value, size_t HASH_TABLE_SIZE = 16384>
+class LruCache final
 {
 private:
-    struct CacheNode : public IntrusiveListNode<CacheNode>
+    struct CachedValue
     {
-        KeyType key;
-        ValueType value;
+        Value value;
+        Key key;
+        CachedValue* lruPrev{nullptr};
+        CachedValue* lruNext{nullptr};
+        CachedValue* hashNext{nullptr};
 
-        template <typename K, typename V>
-        CacheNode(K&& k, V&& v)
-            : key(std::forward<K>(k))
-            , value(std::forward<V>(v))
+        template <typename... Args>
+        CachedValue(Args&&... args)
+            : value(std::forward<Args>(args)...)
+            , key()
+            , lruPrev(nullptr)
+            , lruNext(nullptr)
+            , hashNext(nullptr)
         {
         }
+
+        CachedValue() = default;
     };
 
+    using PoolType = NodePool<CachedValue, StrictHeapPolicy>;
+
 public:
-    explicit LRUCache(size_t maxSize = 10)
-        : maxSize_(maxSize)
-        , nodePool_(maxSize) // Пул того же размера что и кэш
+    explicit LruCache(const size_t poolSize)
+        : cachePool_(poolSize)
+        , lruHead_(nullptr)
+        , lruTail_(nullptr)
+        , cacheSize_(0)
     {
-        cacheMap_.reserve(maxSize);
+        hashTable_.fill(nullptr);
     }
 
-    ~LRUCache()
+    ~LruCache() = default;
+
+    LruCache(const LruCache&) = delete;
+    LruCache& operator=(const LruCache&) = delete;
+
+    template <typename... Args>
+    Value* put(const Key& key, Args&&... args)
     {
-        clear();
+        remove(key);
+
+        auto* poolNode = cachePool_.acquire();
+        if (!poolNode)
+        {
+            if (cacheSize_ > 0)
+            {
+                evictLRU();
+                poolNode = cachePool_.acquire();
+            }
+            if (!poolNode)
+            {
+                return nullptr;
+            }
+        }
+
+        new (&poolNode->data.value) Value(std::forward<Args>(args)...);
+        CachedValue* node = &poolNode->data;
+
+        node->key = key;
+        node->lruPrev = nullptr;
+        node->lruNext = nullptr;
+        node->hashNext = nullptr;
+
+        insertIntoHashTable(node);
+        addToLRU(node);
+
+        cacheSize_++;
+
+        return &node->value;
     }
 
-    /// @brief Сохраняет значение в кэше
-    bool put(KeyType key, ValueType value)
+    Value* get(const Key& key)
     {
-        if (maxSize_ == 0)
+        CachedValue* node = find(key);
+        if (node)
+        {
+            touch(node);
+            return &node->value;
+        }
+        return nullptr;
+    }
+
+    void release(const Key& key)
+    {
+        CachedValue* node = find(key);
+        if (node)
+        {
+            touch(node);
+        }
+    }
+
+    bool remove(const Key& key)
+    {
+        CachedValue* node = find(key);
+        if (!node)
+        {
             return false;
-
-        auto it = cacheMap_.find(key);
-        if (it != cacheMap_.end())
-        {
-            // Обновляем существующий элемент
-            it->second->value = std::move(value);
-            promote(it->second);
-            return true;
         }
 
-        // Проверяем необходимость вытеснения
-        if (cacheList_.size() >= maxSize_)
-        {
-            // Вытесняем самый старый элемент
-            evictOldest();
-        }
-
-        // Создаем новый узел через пул
-        CacheNode* node = nodePool_.construct(std::move(key), std::move(value));
-
-        // Добавляем в начало списка
-        cacheList_.push_front(*node);
-        cacheMap_.emplace(node->key, node);
-
+        removeFromCache(node);
         return true;
     }
 
-    /// @brief Перегрузки для обратной совместимости
-    bool put(const KeyType& key, const ValueType& value)
+    size_t size() const
     {
-        return put(KeyType(key), ValueType(value));
+        return cacheSize_;
     }
 
-    bool put(const KeyType& key, ValueType&& value)
+    bool contains(const Key& key) const
     {
-        return put(KeyType(key), std::move(value));
+        return find(key) != nullptr;
     }
 
-    /// @brief Ищет значение и возвращает указатель
-    ValueType* find(const KeyType& key)
+    void clear()
     {
-        auto it = cacheMap_.find(key);
-        if (it == cacheMap_.end())
-            return nullptr;
-
-        promote(it->second);
-        return &it->second->value;
-    }
-
-    /// @brief Возвращает optional с ссылкой
-    nonstd::optional<std::reference_wrapper<ValueType>> get(const KeyType& key)
-    {
-        auto it = cacheMap_.find(key);
-        if (it == cacheMap_.end())
-            return std::nullopt;
-
-        promote(it->second);
-        return std::ref(it->second->value);
-    }
-
-    /// @brief Извлекает значение с move-семантикой
-    nonstd::optional<ValueType> extract(const KeyType& key)
-    {
-        auto it = cacheMap_.find(key);
-        if (it == cacheMap_.end())
-            return std::nullopt;
-
-        CacheNode* node = it->second;
-        ValueType result = std::move(node->value);
-
-        removeNode(node);
-        return result;
-    }
-
-    /// @brief Проверяет наличие ключа
-    bool contains(const KeyType& key) const
-    {
-        return cacheMap_.find(key) != cacheMap_.end();
-    }
-
-    /// @brief Удаляет элемент по ключу
-    bool erase(const KeyType& key)
-    {
-        auto it = cacheMap_.find(key);
-        if (it == cacheMap_.end())
-            return false;
-
-        removeNode(it->second);
-        return true;
-    }
-
-    /// @brief Очищает кэш
-    void clear() noexcept
-    {
-        // Удаляем все узлы из списка и возвращаем в пул
-        while (!cacheList_.empty())
+        for (size_t i = 0; i < hashTable_.size(); ++i)
         {
-            CacheNode* node = &cacheList_.back();
-            cacheList_.remove(*node);
-            nodePool_.destroy(node);
-        }
-        cacheMap_.clear();
-    }
+            CachedValue* node = hashTable_[i];
+            while (node)
+            {
+                CachedValue* next = node->hashNext;
 
-    size_t size() const noexcept
-    {
-        return cacheList_.size();
-    }
-    size_t capacity() const noexcept
-    {
-        return maxSize_;
-    }
-    bool empty() const noexcept
-    {
-        return cacheList_.empty();
-    }
+                node->value.~Value();
 
-    /// @brief Изменяет максимальный размер
-    void resize(size_t newMaxSize)
-    {
-        maxSize_ = newMaxSize;
-        cacheMap_.reserve(newMaxSize);
+                auto* poolNode = reinterpret_cast<typename PoolType::Node*>(reinterpret_cast<char*>(node) -
+                                                                            offsetof(typename PoolType::Node, data));
+                cachePool_.release(poolNode);
 
-        // Вытесняем лишние элементы
-        while (cacheList_.size() > maxSize_)
-        {
-            evictOldest();
+                node = next;
+            }
         }
 
-        // Изменяем размер пула (опционально)
-        nodePool_.reserve(newMaxSize);
-    }
-
-    /// @brief Статистика использования
-    size_t pool_size() const noexcept
-    {
-        return nodePool_.size();
-    }
-    size_t pool_capacity() const noexcept
-    {
-        return nodePool_.capacity();
-    }
-    size_t pool_free_count() const noexcept
-    {
-        return nodePool_.free_count();
-    }
-
-    /// @brief Оптимизация: предварительное выделение
-    void reserve(size_t capacity)
-    {
-        maxSize_ = capacity;
-        cacheMap_.reserve(capacity);
-        nodePool_.reserve(capacity);
+        hashTable_.fill(nullptr);
+        lruHead_ = nullptr;
+        lruTail_ = nullptr;
+        cacheSize_ = 0;
     }
 
 private:
-    void promote(CacheNode* node)
+
+    size_t hash(const Key& key) const
     {
-        cacheList_.remove(*node);
-        cacheList_.push_front(*node);
+        return std::hash<Key>{}(key) & (HASH_TABLE_SIZE - 1);
     }
 
-    void removeNode(CacheNode* node)
+    CachedValue* find(const Key& key) const
     {
-        cacheList_.remove(*node);
-        cacheMap_.erase(node->key);
-        nodePool_.destroy(node);
-    }
+        size_t h = hash(key);
+        CachedValue* node = hashTable_[h];
 
-    void evictOldest()
-    {
-        if (cacheList_.empty())
+        while (node)
         {
-            return;
+            if (node->key == key)
+            {
+                return node;
+            }
+            node = node->hashNext;
+        }
+        return nullptr;
+    }
+
+    void insertIntoHashTable(CachedValue* node)
+    {
+        size_t h = hash(node->key);
+        node->hashNext = hashTable_[h];
+        hashTable_[h] = node;
+    }
+
+    void removeFromHashTable(CachedValue* node)
+    {
+        size_t h = hash(node->key);
+        CachedValue* prev = nullptr;
+        CachedValue* current = hashTable_[h];
+
+        while (current)
+        {
+            if (current == node)
+            {
+                if (prev)
+                {
+                    prev->hashNext = current->hashNext;
+                }
+                else
+                {
+                    hashTable_[h] = current->hashNext;
+                }
+                break;
+            }
+            prev = current;
+            current = current->hashNext;
+        }
+    }
+
+    void addToLRU(CachedValue* node)
+    {
+        node->lruPrev = nullptr;
+        node->lruNext = lruHead_;
+
+        if (lruHead_)
+        {
+            lruHead_->lruPrev = node;
         }
 
-        CacheNode* node = &cacheList_.back();
-        cacheList_.remove(*node);
-        cacheMap_.erase(node->key);
-        nodePool_.destroy(node);
+        lruHead_ = node;
+
+        if (!lruTail_)
+        {
+            lruTail_ = node;
+        }
     }
 
-    size_t maxSize_;
-    IntrusiveList<CacheNode> cacheList_;
-    std::unordered_map<KeyType, CacheNode*> cacheMap_;
-    ObjectPool<CacheNode> nodePool_;
+    void removeFromLRU(CachedValue* node)
+    {
+        if (node->lruPrev)
+        {
+            node->lruPrev->lruNext = node->lruNext;
+        }
+        else
+        {
+            lruHead_ = node->lruNext;
+        }
+
+        if (node->lruNext)
+        {
+            node->lruNext->lruPrev = node->lruPrev;
+        }
+        else
+        {
+            lruTail_ = node->lruPrev;
+        }
+    }
+
+    void touch(CachedValue* node)
+    {
+        removeFromLRU(node);
+        addToLRU(node);
+    }
+
+    void evictLRU()
+    {
+        if (lruTail_)
+        {
+            removeFromCache(lruTail_);
+        }
+    }
+
+    void removeFromCache(CachedValue* node)
+    {
+        removeFromHashTable(node);
+        removeFromLRU(node);
+
+        node->value.~Value();
+
+        auto* poolNode = reinterpret_cast<typename PoolType::Node*>(reinterpret_cast<char*>(node) -
+                                                                    offsetof(typename PoolType::Node, data));
+        cachePool_.release(poolNode);
+
+        cacheSize_--;
+    }
+
+private:
+    PoolType cachePool_;
+    std::array<CachedValue*, HASH_TABLE_SIZE> hashTable_;
+    CachedValue* lruHead_;
+    CachedValue* lruTail_;
+    size_t cacheSize_;
 };
 
 } // namespace casket
