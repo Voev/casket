@@ -744,11 +744,15 @@ private:
     void removeClient(int fd)
     {
         if (!contextCache_)
+        {
             return;
+        }
 
         ClientContext* ctx = contextCache_->get(fd);
         if (!ctx || !ctx->isActive())
+        {
             return;
+        }
 
         if (poller_)
         {
