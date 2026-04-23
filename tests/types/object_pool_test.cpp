@@ -3,379 +3,297 @@
 
 using namespace casket;
 
-class TestObject
+struct TestObject
 {
-public:
-    static int constructorCount;
-    static int destructorCount;
-    static int copyCount;
-    static int moveCount;
-    static int paramConstructorCount;
-
     int value;
-    std::string name;
+    char data[64];
 
     TestObject()
         : value(0)
-        , name("default")
     {
-        constructorCount++;
     }
-
     explicit TestObject(int v)
         : value(v)
-        , name("param")
     {
-        paramConstructorCount++;
     }
-
-    TestObject(int v, std::string n)
+    TestObject(int v, char c)
         : value(v)
-        , name(std::move(n))
     {
-        paramConstructorCount++;
+        data[0] = c;
     }
 
-    TestObject(const TestObject& other)
-        : value(other.value)
-        , name(other.name)
+    void reset()
     {
-        copyCount++;
-    }
-
-    TestObject(TestObject&& other) noexcept
-        : value(other.value)
-        , name(std::move(other.name))
-    {
-        moveCount++;
-        other.value = -1;
-    }
-
-    ~TestObject()
-    {
-        destructorCount++;
-    }
-
-    TestObject& operator=(const TestObject& other)
-    {
-        value = other.value;
-        name = other.name;
-        copyCount++;
-        return *this;
-    }
-
-    TestObject& operator=(TestObject&& other) noexcept
-    {
-        value = other.value;
-        name = std::move(other.name);
-        other.value = -1;
-        moveCount++;
-        return *this;
-    }
-
-    static void resetCounters()
-    {
-        constructorCount = 0;
-        destructorCount = 0;
-        copyCount = 0;
-        moveCount = 0;
-        paramConstructorCount = 0;
+        value = 0;
     }
 };
 
-int TestObject::constructorCount = 0;
-int TestObject::destructorCount = 0;
-int TestObject::copyCount = 0;
-int TestObject::moveCount = 0;
-int TestObject::paramConstructorCount = 0;
-
-class ObjectPoolTest : public ::testing::Test
-{
-protected:
-    void SetUp() override
-    {
-        TestObject::resetCounters();
-    }
-
-    void TearDown() override
-    {
-        TestObject::resetCounters();
-    }
-};
-
-TEST_F(ObjectPoolTest, BasicCreateDestroy)
-{
-    ObjectPool<TestObject> pool;
-
-    ASSERT_EQ(pool.size(), 0);
-    ASSERT_EQ(pool.capacity(), 0);
-    ASSERT_TRUE(pool.empty());
-
-    TestObject* obj = pool.create(42, "test");
-    ASSERT_NE(obj, nullptr);
-    ASSERT_EQ(obj->value, 42);
-    ASSERT_EQ(obj->name, "test");
-    ASSERT_EQ(pool.size(), 1);
-    ASSERT_FALSE(pool.empty());
-
-    pool.destroy(obj);
-    ASSERT_EQ(pool.size(), 0);
-    ASSERT_TRUE(pool.empty());
-}
-
-TEST_F(ObjectPoolTest, ConstructorDestructorCount)
-{
-    {
-        ObjectPool<TestObject> pool;
-
-        ASSERT_EQ(TestObject::constructorCount, 0);
-        ASSERT_EQ(TestObject::paramConstructorCount, 0);
-        ASSERT_EQ(TestObject::destructorCount, 0);
-
-        TestObject* obj1 = pool.create(1, "first");
-        ASSERT_EQ(TestObject::paramConstructorCount, 1);
-        ASSERT_EQ(TestObject::constructorCount, 0);
-        ASSERT_EQ(TestObject::destructorCount, 0);
-
-        TestObject* obj2 = pool.create(2, "second");
-        ASSERT_EQ(TestObject::paramConstructorCount, 2);
-        ASSERT_EQ(TestObject::constructorCount, 0);
-
-        pool.destroy(obj1);
-        ASSERT_EQ(TestObject::destructorCount, 1);
-
-        pool.destroy(obj2);
-        ASSERT_EQ(TestObject::destructorCount, 2);
-    }
-    ASSERT_EQ(TestObject::destructorCount, 2);
-}
-
-TEST_F(ObjectPoolTest, MoveSemanticsNoExtraConstructions)
-{
-    ObjectPool<TestObject> pool1(5);
-
-    for (int i = 0; i < 3; ++i)
-    {
-        pool1.create(i, "obj" + std::to_string(i));
-    }
-
-    size_t originalSize = pool1.size();
-    size_t originalCapacity = pool1.capacity();
-    int originalConstructorCount = TestObject::paramConstructorCount;
-
-    ObjectPool<TestObject> pool2 = std::move(pool1);
-
-    ASSERT_EQ(pool2.size(), originalSize);
-    ASSERT_EQ(pool2.capacity(), originalCapacity);
-    ASSERT_EQ(pool1.size(), 0);
-    ASSERT_EQ(pool1.capacity(), 0);
-    ASSERT_TRUE(pool1.empty());
-
-    ASSERT_EQ(TestObject::paramConstructorCount, originalConstructorCount);
-}
-
-TEST_F(ObjectPoolTest, ClearFunctionDestroysOnlyConstructedObjects)
+TEST(ObjectPoolTest, AcquireReleaseFromPool)
 {
     ObjectPool<TestObject> pool(10);
+
+    TestObject* obj1 = pool.acquire();
+    ASSERT_NE(obj1, nullptr);
+    obj1->value = 42;
+
+    TestObject* obj2 = pool.acquire();
+    ASSERT_NE(obj2, nullptr);
+    obj2->value = 100;
+
+    EXPECT_EQ(pool.poolSize(), 10);
+
+    pool.release(obj1);
+    pool.release(obj2);
+}
+
+TEST(ObjectPoolTest, AcquireWithArgs)
+{
+    ObjectPool<TestObject> pool(10);
+
+    TestObject* obj = pool.acquire(42);
+    ASSERT_NE(obj, nullptr);
+    EXPECT_EQ(obj->value, 42);
+
+    pool.release(obj);
+}
+
+TEST(ObjectPoolTest, AcquireWithMultipleArgs)
+{
+    ObjectPool<TestObject> pool(10);
+
+    TestObject* obj = pool.acquire(42, 'X');
+    ASSERT_NE(obj, nullptr);
+    EXPECT_EQ(obj->value, 42);
+    EXPECT_EQ(obj->data[0], 'X');
+
+    pool.release(obj);
+}
+
+TEST(ObjectPoolTest, PoolExhaustionStrictPolicy)
+{
+    ObjectPool<TestObject, StrictHeapPolicy> pool(3);
+
+    TestObject* obj1 = pool.acquire();
+    TestObject* obj2 = pool.acquire();
+    TestObject* obj3 = pool.acquire();
+
+    ASSERT_NE(obj1, nullptr);
+    ASSERT_NE(obj2, nullptr);
+    ASSERT_NE(obj3, nullptr);
+
+    TestObject* obj4 = pool.acquire();
+    EXPECT_EQ(obj4, nullptr);
+
+    pool.release(obj1);
+    pool.release(obj2);
+    pool.release(obj3);
+}
+
+TEST(ObjectPoolTest, PoolExhaustionFallbackPolicy)
+{
+    ObjectPool<TestObject, HeapAllocationPolicy> pool(3);
+
+    TestObject* obj1 = pool.acquire();
+    TestObject* obj2 = pool.acquire();
+    TestObject* obj3 = pool.acquire();
+    TestObject* obj4 = pool.acquire();
+
+    ASSERT_NE(obj1, nullptr);
+    ASSERT_NE(obj2, nullptr);
+    ASSERT_NE(obj3, nullptr);
+    ASSERT_NE(obj4, nullptr);
+
+    pool.release(obj1);
+    pool.release(obj2);
+    pool.release(obj3);
+    pool.release(obj4);
+}
+
+TEST(ObjectPoolTest, ReuseAfterRelease)
+{
+    ObjectPool<TestObject> pool(2);
+
+    TestObject* obj1 = pool.acquire(10);
+    TestObject* obj2 = pool.acquire(20);
+
+    EXPECT_EQ(obj1->value, 10);
+    EXPECT_EQ(obj2->value, 20);
+
+    pool.release(obj1);
+    pool.release(obj2);
+
+    TestObject* obj3 = pool.acquire(30);
+    TestObject* obj4 = pool.acquire(40);
+
+    EXPECT_EQ(obj3->value, 30);
+    EXPECT_EQ(obj4->value, 40);
+}
+
+TEST(ObjectPoolTest, ZeroSizePool)
+{
+    ObjectPool<TestObject, StrictHeapPolicy> pool(0);
+
+    TestObject* obj = pool.acquire();
+    EXPECT_EQ(obj, nullptr);
+}
+
+TEST(ObjectPoolTest, LargePool)
+{
+    const size_t poolSize = 10000;
+    ObjectPool<TestObject> pool(poolSize);
+
+    std::vector<TestObject*> objects;
+    for (size_t i = 0; i < poolSize; ++i)
+    {
+        TestObject* obj = pool.acquire(static_cast<int>(i));
+        ASSERT_NE(obj, nullptr);
+        EXPECT_EQ(obj->value, static_cast<int>(i));
+        objects.push_back(obj);
+    }
+
+    TestObject* extra = pool.acquire();
+    EXPECT_NE(extra, nullptr);
+
+    for (auto* obj : objects)
+    {
+        pool.release(obj);
+    }
+    pool.release(extra);
+}
+
+TEST(ObjectPoolTest, ClearPool)
+{
+    ObjectPool<TestObject> pool(5);
 
     std::vector<TestObject*> objects;
     for (int i = 0; i < 5; ++i)
     {
-        objects.push_back(pool.create(i, "obj" + std::to_string(i)));
+        objects.push_back(pool.acquire(i));
     }
 
-    ASSERT_EQ(pool.size(), 5);
-    ASSERT_EQ(TestObject::paramConstructorCount, 5);
-    ASSERT_EQ(TestObject::destructorCount, 0);
+    for (auto* obj : objects)
+    {
+        pool.release(obj);
+    }
 
     pool.clear();
 
-    ASSERT_EQ(pool.size(), 0);
-    ASSERT_EQ(pool.capacity(), 0);
-    ASSERT_EQ(TestObject::destructorCount, 5);
+    TestObject* obj = pool.acquire();
+    ASSERT_NE(obj, nullptr);
+    pool.release(obj);
 }
 
-struct ThrowOnConstruction
+TEST(ObjectPoolTest, MixedHeapAndPool)
 {
-    static int constructorCount;
-    static int destructorCount;
+    ObjectPool<TestObject, HeapAllocationPolicy> pool(2);
 
-    ThrowOnConstruction()
-    {
-        constructorCount++;
-        throw std::runtime_error("Construction failed");
-    }
+    TestObject* poolObj1 = pool.acquire(10);
+    TestObject* poolObj2 = pool.acquire(20);
+    TestObject* heapObj = pool.acquire(30);
 
-    ~ThrowOnConstruction()
-    {
-        destructorCount++;
-    }
-};
+    EXPECT_NE(poolObj1, nullptr);
+    EXPECT_NE(poolObj2, nullptr);
+    EXPECT_NE(heapObj, nullptr);
 
-int ThrowOnConstruction::constructorCount = 0;
-int ThrowOnConstruction::destructorCount = 0;
-
-TEST_F(ObjectPoolTest, ExceptionSafetyNoLeaks)
-{
-    ObjectPool<ThrowOnConstruction> pool;
-
-    ASSERT_THROW(pool.create(), std::runtime_error);
-    ASSERT_EQ(pool.size(), 0);
-
-    ASSERT_EQ(ThrowOnConstruction::constructorCount, 1);
-    ASSERT_EQ(ThrowOnConstruction::destructorCount, 0);
+    pool.release(poolObj1);
+    pool.release(poolObj2);
+    pool.release(heapObj);
 }
 
-TEST_F(ObjectPoolTest, SmartPointerHelpersProperDestruction)
+TEST(ObjectPoolTest, ReleaseNullptr)
 {
-    ObjectPool<TestObject> pool;
+    ObjectPool<TestObject> pool(1);
 
-    int initialDestructorCount = TestObject::destructorCount;
-    int initialConstructorCount = TestObject::paramConstructorCount;
+    pool.release(nullptr);
 
-    {
-        auto sharedObj = make_shared_from_pool(pool, 100, "shared");
-        ASSERT_EQ(sharedObj->value, 100);
-        ASSERT_EQ(sharedObj->name, "shared");
-        ASSERT_EQ(pool.size(), 1);
-        ASSERT_EQ(TestObject::paramConstructorCount, initialConstructorCount + 1);
-    }
-
-    ASSERT_EQ(pool.size(), 0);
-    ASSERT_EQ(TestObject::destructorCount, initialDestructorCount + 1);
+    TestObject* obj = pool.acquire();
+    ASSERT_NE(obj, nullptr);
 }
 
-TEST_F(ObjectPoolTest, ExceptionSafety)
+TEST(ObjectPoolTest, AcquireAfterClear)
 {
-    struct ThrowOnConstruction
+    ObjectPool<TestObject> pool(3);
+
+    TestObject* obj1 = pool.acquire(1);
+    TestObject* obj2 = pool.acquire(2);
+
+    pool.release(obj1);
+    pool.release(obj2);
+
+    pool.clear();
+
+    TestObject* obj3 = pool.acquire(3);
+    ASSERT_NE(obj3, nullptr);
+    EXPECT_EQ(obj3->value, 3);
+
+    pool.release(obj3);
+}
+
+TEST(ObjectPoolTest, MultipleAcquireWithDifferentArgs)
+{
+    ObjectPool<TestObject> pool(5);
+
+    TestObject* obj1 = pool.acquire(10);
+    TestObject* obj2 = pool.acquire(20);
+    TestObject* obj3 = pool.acquire(30);
+
+    EXPECT_EQ(obj1->value, 10);
+    EXPECT_EQ(obj2->value, 20);
+    EXPECT_EQ(obj3->value, 30);
+
+    pool.release(obj1);
+    pool.release(obj2);
+    pool.release(obj3);
+}
+
+TEST(ObjectPoolTest, StringObject)
+{
+    struct StringObject
     {
-        ThrowOnConstruction()
+        std::string str;
+        StringObject() = default;
+        explicit StringObject(const std::string& s)
+            : str(s)
         {
-            throw std::runtime_error("Construction failed");
+        }
+        void reset()
+        {
+            str.clear();
         }
     };
 
-    ObjectPool<ThrowOnConstruction> pool;
+    ObjectPool<StringObject> pool(5);
 
-    ASSERT_THROW(pool.create(), std::runtime_error);
-    ASSERT_EQ(pool.size(), 0);
+    StringObject* obj = pool.acquire(std::string("hello"));
+    ASSERT_NE(obj, nullptr);
+    EXPECT_EQ(obj->str, "hello");
+
+    pool.release(obj);
 }
 
-template <typename T>
-class TestAllocator
+TEST(ObjectPoolTest, StressTest)
 {
-public:
-    using value_type = T;
-
-    TestAllocator() = default;
-
-    template <typename U>
-    TestAllocator(const TestAllocator<U>&)
-    {
-    }
-
-    T* allocate(std::size_t n)
-    {
-        allocationCount += n;
-        return static_cast<T*>(::operator new(n * sizeof(T)));
-    }
-
-    void deallocate(T* p, std::size_t n)
-    {
-        deallocationCount += n;
-        ::operator delete(p);
-    }
-
-    static std::size_t allocationCount;
-    static std::size_t deallocationCount;
-
-    static void resetCounters()
-    {
-        allocationCount = 0;
-        deallocationCount = 0;
-    }
-};
-
-template <typename T>
-std::size_t TestAllocator<T>::allocationCount = 0;
-
-template <typename T>
-std::size_t TestAllocator<T>::deallocationCount = 0;
-
-TEST_F(ObjectPoolTest, CustomAllocator)
-{
-    TestAllocator<TestObject>::resetCounters();
-
-    ObjectPool<TestObject, TestAllocator<TestObject>> pool;
-    pool.reserve(5);
-
-    ASSERT_GT(TestAllocator<TestObject>::allocationCount, 0);
-
-    auto obj = pool.create(42, "test");
-    pool.destroy(obj);
-
-    pool.clear();
-    ASSERT_GT(TestAllocator<TestObject>::deallocationCount, 0);
-}
-
-TEST_F(ObjectPoolTest, SmartPointerHelpers)
-{
-    ObjectPool<TestObject> pool;
-
-    {
-        auto sharedObj = make_shared_from_pool(pool, 100, "shared");
-        ASSERT_EQ(sharedObj->value, 100);
-        ASSERT_EQ(sharedObj->name, "shared");
-        ASSERT_EQ(pool.size(), 1);
-    }
-    ASSERT_EQ(pool.size(), 0);
-
-    {
-        auto uniqueObj = make_unique_from_pool(pool, 200, "unique");
-        ASSERT_EQ(uniqueObj->value, 200);
-        ASSERT_EQ(uniqueObj->name, "unique");
-        ASSERT_EQ(pool.size(), 1);
-    }
-    ASSERT_EQ(pool.size(), 0);
-}
-
-TEST_F(ObjectPoolTest, InvalidDestroyThrows)
-{
-    ObjectPool<TestObject> pool;
-    TestObject localObj;
-
-    ASSERT_THROW(pool.destroy(&localObj), std::invalid_argument);
-
-    TestObject* validObj = pool.create(1, "valid");
-    pool.destroy(validObj);
-
-    ASSERT_THROW(pool.destroy(validObj), std::invalid_argument);
-}
-
-TEST_F(ObjectPoolTest, LargeNumberOfObjects)
-{
-    const int COUNT = 1000;
-    ObjectPool<TestObject> pool;
-
+    ObjectPool<TestObject> pool(100);
     std::vector<TestObject*> objects;
-    for (int i = 0; i < COUNT; ++i)
+
+    for (int i = 0; i < 1000; ++i)
     {
-        objects.push_back(pool.create(i, "obj" + std::to_string(i)));
+        TestObject* obj = pool.acquire(i);
+        if (obj)
+        {
+            EXPECT_EQ(obj->value, i);
+            objects.push_back(obj);
+        }
+
+        if (objects.size() > 50)
+        {
+            pool.release(objects.front());
+            objects.erase(objects.begin());
+        }
     }
 
-    ASSERT_EQ(pool.size(), COUNT);
-
-    for (int i = COUNT - 1; i >= 0; i -= 2)
+    for (auto* obj : objects)
     {
-        pool.destroy(objects[i]);
+        pool.release(obj);
     }
-
-    ASSERT_EQ(pool.size(), COUNT / 2);
-
-    for (int i = 0; i < COUNT / 2; ++i)
-    {
-        pool.create(i + COUNT, "newObj" + std::to_string(i));
-    }
-
-    ASSERT_EQ(pool.size(), COUNT);
 }

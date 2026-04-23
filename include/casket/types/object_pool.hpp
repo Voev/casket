@@ -1,262 +1,180 @@
 #pragma once
-#include <memory>
-#include <vector>
-#include <stack>
-#include <functional>
-#include <type_traits>
-#include <cassert>
+
 #include <cstddef>
+#include <cassert>
 #include <new>
 
 namespace casket
 {
 
-template <typename T, typename Allocator = std::allocator<T>>
+/// @brief Policy that always uses heap allocation
+struct HeapAllocationPolicy
+{
+    template <typename Node, typename... Args>
+    static Node* create(Args&&... args)
+    {
+        return new Node(std::forward<Args>(args)...);
+    }
+
+    template <typename Node>
+    static void destroy(Node* node)
+    {
+        delete node;
+    }
+};
+
+/// @brief Policy that never uses heap, only preallocated pool
+struct StrictHeapPolicy
+{
+    template <typename Node, typename... Args>
+    static Node* create(Args&&...)
+    {
+        return nullptr;
+    }
+
+    template <typename Node>
+    static void destroy(Node*)
+    {
+    }
+};
+
+template <typename T, typename AllocPolicy = HeapAllocationPolicy>
 class ObjectPool
 {
 public:
-    using value_type = T;
-    using allocator_type = Allocator;
-    using pointer = typename std::allocator_traits<Allocator>::pointer;
-    using size_type = typename std::allocator_traits<Allocator>::size_type;
-
-    explicit ObjectPool(const Allocator& alloc = Allocator())
-        : alloc_(alloc)
-        , capacity_(0)
-        , size_(0)
+    struct Node
     {
+        T data;
+        Node* next{nullptr};
+
+        template <typename... Args>
+        Node(Args&&... args)
+            : data(std::forward<Args>(args)...)
+            , next(nullptr)
+        {
+        }
+    };
+
+    template <typename... Args>
+    explicit ObjectPool(size_t poolSize, Args&&... args)
+        : poolSize_(poolSize)
+        , pool_(static_cast<char*>(operator new[](poolSize * sizeof(Node))))
+        , freeList_(nullptr)
+    {
+        char* ptr = pool_;
+        for (size_t i = 0; i < poolSize; ++i)
+        {
+            Node* node = new (ptr) Node(std::forward<Args>(args)...);
+            node->next = freeList_;
+            freeList_ = node;
+            ptr += sizeof(Node);
+        }
     }
 
-    explicit ObjectPool(size_type initialCapacity, const Allocator& alloc = Allocator())
-        : alloc_(alloc)
-        , capacity_(0)
-        , size_(0)
+    ~ObjectPool()
     {
-        reserve(initialCapacity);
+        clear();
+        operator delete[](pool_);
+    }
+
+    T* acquire()
+    {
+        if (freeList_)
+        {
+            Node* node = freeList_;
+            freeList_ = freeList_->next;
+            return &node->data;
+        }
+        
+        Node* node = AllocPolicy::template create<Node>();
+        return node ? &node->data : nullptr;
+    }
+
+    template <typename... Args>
+    T* acquire(Args&&... args)
+    {
+        if (freeList_)
+        {
+            Node* node = freeList_;
+            freeList_ = freeList_->next;
+            new (&node->data) T(std::forward<Args>(args)...);
+            return &node->data;
+        }
+        
+        Node* node = AllocPolicy::template create<Node>(std::forward<Args>(args)...);
+        return node ? &node->data : nullptr;
+    }
+
+    void release(T* data)
+    {
+        if (!data)
+            return;
+
+        Node* node = reinterpret_cast<Node*>(reinterpret_cast<char*>(data) - offsetof(Node, data));
+        
+        if (isFromPool(node))
+        {
+            node->next = freeList_;
+            freeList_ = node;
+        }
+        else
+        {
+            data->~T();
+            AllocPolicy::template destroy<Node>(node);
+        }
+    }
+
+    size_t poolSize() const
+    {
+        return poolSize_;
+    }
+
+    void clear()
+    {
+        Node* node = freeList_;
+        Node* prev = nullptr;
+
+        while (node)
+        {
+            Node* next = node->next;
+
+            if (!isFromPool(node))
+            {
+                if (prev)
+                    prev->next = next;
+                else
+                    freeList_ = next;
+
+                AllocPolicy::template destroy<Node>(node);
+                node = next;
+            }
+            else
+            {
+                prev = node;
+                node = next;
+            }
+        }
     }
 
     ObjectPool(const ObjectPool&) = delete;
     ObjectPool& operator=(const ObjectPool&) = delete;
 
-    ObjectPool(ObjectPool&& other) noexcept
-        : alloc_(std::move(other.alloc_))
-        , memoryBlocks_(std::move(other.memoryBlocks_))
-        , freeList_(std::move(other.freeList_))
-        , capacity_(other.capacity_)
-        , size_(other.size_)
-    {
-        other.capacity_ = 0;
-        other.size_ = 0;
-    }
-
-    ObjectPool& operator=(ObjectPool&& other) noexcept
-    {
-        if (this != &other)
-        {
-            clear();
-            alloc_ = std::move(other.alloc_);
-            memoryBlocks_ = std::move(other.memoryBlocks_);
-            freeList_ = std::move(other.freeList_);
-            capacity_ = other.capacity_;
-            size_ = other.size_;
-            other.capacity_ = 0;
-            other.size_ = 0;
-        }
-        return *this;
-    }
-
-    ~ObjectPool() noexcept
-    {
-        clear();
-    }
-
-    template <typename... Args>
-    T* create(Args&&... args)
-    {
-        if (freeList_.empty())
-        {
-            expand();
-        }
-
-        size_type index = freeList_.top();
-        freeList_.pop();
-        size_++;
-
-        T* obj = getObjectPtr(index);
-        try
-        {
-            std::allocator_traits<Allocator>::construct(alloc_, obj, std::forward<Args>(args)...);
-        }
-        catch (...)
-        {
-            freeList_.push(index);
-            size_--;
-            throw;
-        }
-
-        return obj;
-    }
-
-    void destroy(T* object)
-    {
-        assert(object != nullptr && "Cannot destroy null object");
-
-        bool belongsToPool = false;
-        size_type index = 0;
-
-        for (size_type blockIdx = 0; blockIdx < memoryBlocks_.size(); ++blockIdx)
-        {
-            char* blockStart = memoryBlocks_[blockIdx].get();
-            char* blockEnd = blockStart + blockSize_ * sizeof(T);
-
-            if (reinterpret_cast<char*>(object) >= blockStart && reinterpret_cast<char*>(object) < blockEnd)
-            {
-                belongsToPool = true;
-                index = blockIdx * blockSize_ + (reinterpret_cast<char*>(object) - blockStart) / sizeof(T);
-                break;
-            }
-        }
-
-        if (!belongsToPool)
-        {
-            throw std::invalid_argument("Object does not belong to this pool");
-        }
-
-        if (isFree(index))
-        {
-            throw std::invalid_argument("Object has already been destroyed");
-        }
-
-        std::allocator_traits<Allocator>::destroy(alloc_, object);
-        freeList_.push(index);
-        size_--;
-    }
-
-    void reserve(size_type newCapacity)
-    {
-        if (newCapacity <= capacity_)
-            return;
-
-        size_type blocks_needed = (newCapacity - capacity_ + blockSize_ - 1) / blockSize_;
-
-        for (size_type i = 0; i < blocks_needed; ++i)
-        {
-            char* block = reinterpret_cast<char*>(std::allocator_traits<Allocator>::allocate(alloc_, blockSize_));
-
-            memoryBlocks_.emplace_back(
-                block, [this](char* ptr)
-                { std::allocator_traits<Allocator>::deallocate(alloc_, reinterpret_cast<T*>(ptr), blockSize_); });
-
-            for (size_type j = 0; j < blockSize_; ++j)
-            {
-                freeList_.push(capacity_ + i * blockSize_ + j);
-            }
-        }
-
-        capacity_ += blocks_needed * blockSize_;
-    }
-
-    void clear() noexcept
-    {
-        for (size_type i = 0; i < capacity_; ++i)
-        {
-            if (!isFree(i))
-            {
-                T* obj = getObjectPtr(i);
-                if (obj)
-                {
-                    std::allocator_traits<Allocator>::destroy(alloc_, obj);
-                }
-            }
-        }
-
-        memoryBlocks_.clear();
-        while (!freeList_.empty())
-        {
-            freeList_.pop();
-        }
-        capacity_ = 0;
-        size_ = 0;
-    }
-
-    size_type capacity() const noexcept
-    {
-        return capacity_;
-    }
-
-    size_type size() const noexcept
-    {
-        return size_;
-    }
-
-    bool empty() const noexcept
-    {
-        return size_ == 0;
-    }
-
-    allocator_type getAllocator() const noexcept
-    {
-        return alloc_;
-    }
-
 private:
-    static constexpr size_type blockSize_ = 64;
-
-    Allocator alloc_;
-    std::vector<std::unique_ptr<char[], std::function<void(char*)>>> memoryBlocks_;
-    std::stack<size_type> freeList_;
-    size_type capacity_;
-    size_type size_;
-
-    void expand()
+    bool isFromPool(Node* node) const
     {
-        size_type newCapacity = capacity_ == 0 ? blockSize_ : capacity_ * 2;
-        reserve(newCapacity);
+        const char* nodePtr = reinterpret_cast<const char*>(node);
+        return nodePtr >= pool_ && nodePtr < pool_ + poolSize_ * sizeof(Node);
     }
 
-    T* getObjectPtr(size_type index)
-    {
-        if (index >= capacity_)
-        {
-            return nullptr;
-        }
-
-        size_type blockIndex = index / blockSize_;
-        size_type objectIndex = index % blockSize_;
-
-        if (blockIndex >= memoryBlocks_.size())
-        {
-            return nullptr;
-        }
-
-        char* block = memoryBlocks_[blockIndex].get();
-        return reinterpret_cast<T*>(block + objectIndex * sizeof(T));
-    }
-
-    bool isFree(size_type index) const
-    {
-        auto temp = freeList_;
-        while (!temp.empty())
-        {
-            if (temp.top() == index)
-                return true;
-            temp.pop();
-        }
-        return false;
-    }
+    size_t poolSize_;
+    char* pool_;
+    Node* freeList_;
 };
 
-template <typename T, typename Allocator = std::allocator<T>, typename... Args>
-std::shared_ptr<T> make_shared_from_pool(ObjectPool<T, Allocator>& pool, Args&&... args)
-{
-    return std::shared_ptr<T>(pool.create(std::forward<Args>(args)...), [&pool](T* obj) { pool.destroy(obj); });
-}
+template <typename T>
+using HeapObjectPool = ObjectPool<T, HeapAllocationPolicy>;
 
-template <typename T, typename Allocator = std::allocator<T>, typename... Args>
-std::unique_ptr<T, std::function<void(T*)>> make_unique_from_pool(ObjectPool<T, Allocator>& pool, Args&&... args)
-{
-    return std::unique_ptr<T, std::function<void(T*)>>(pool.create(std::forward<Args>(args)...),
-                                                       [&pool](T* obj) { pool.destroy(obj); });
-}
+template <typename T>
+using StrictObjectPool = ObjectPool<T, StrictHeapPolicy>;
 
 } // namespace casket
