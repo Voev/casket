@@ -61,16 +61,16 @@ public:
     };
 
     /// @brief Constructs a node pool with fixed size.
-    /// @param[in] poolSize Number of preallocated nodes. Default 8192.
-    explicit NodePool(size_t poolSize = 8192)
+    /// @param poolSize Number of preallocated nodes.
+    /// @param args Arguments to forward to T constructor for all nodes
+    template <typename... Args>
+    explicit NodePool(size_t poolSize, Args&&... args)
         : pool_(poolSize)
         , freeList_(nullptr)
     {
-        // Initialize free list
         for (size_t i = 0; i < poolSize; ++i)
         {
-            // Placement new to construct nodes in preallocated memory
-            new (&pool_[i]) Node();
+            new (&pool_[i]) Node(std::forward<Args>(args)...);
             pool_[i].next = freeList_;
             freeList_ = &pool_[i];
         }
