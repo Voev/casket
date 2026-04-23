@@ -1,7 +1,8 @@
 #pragma once
 
 #include <cstddef>
-#include <casket/types/node_pool.hpp>
+#include <utility>
+#include <casket/types/object_pool.hpp>
 
 namespace casket
 {
@@ -11,83 +12,108 @@ namespace casket
 /// @tparam AllocPolicy Allocation policy for node pool.
 /// @note NOT thread-safe. All operations must be called from a single thread.
 template <typename T, typename AllocPolicy = HeapAllocationPolicy>
-class PooledQueue
+class BasicPooledQueue
 {
 private:
-    using Node = typename NodePool<T, AllocPolicy>::Node;
+    struct Node
+    {
+        T data;
+        Node* next{nullptr};
+
+        template <typename... Args>
+        Node(Args&&... args)
+            : data(std::forward<Args>(args)...)
+            , next(nullptr)
+        {
+        }
+    };
+
+    using PoolType = ObjectPool<Node, AllocPolicy>;
 
 public:
     /// @brief Constructs an empty queue.
-    /// @param[in] poolSize Size of internal node pool. Default 8192.
-    explicit PooledQueue(size_t poolSize = 8192)
-        : pool_(poolSize)
+    /// @param poolSize Size of internal node pool.
+    /// @param args Arguments to initialize all nodes in the pool (including stub)
+    template <typename... Args>
+    explicit BasicPooledQueue(size_t poolSize, Args&&... args)
+        : pool_(poolSize + 1, std::forward<Args>(args)...)
     {
         Node* stub = pool_.acquire();
-        stub->next = nullptr;
-        head_ = stub;
-        tail_ = stub;
+        if (stub)
+        {
+            stub->next = nullptr;
+            head_ = stub;
+            tail_ = stub;
+        }
     }
 
     /// @brief Destructor. Clears all elements and releases resources.
-    ~PooledQueue() noexcept
+    ~BasicPooledQueue() noexcept
     {
         clear();
         pool_.release(head_);
     }
 
     /// @brief Pushes an element into the queue (move version).
-    /// @param[in] value Rvalue reference to element. Will be moved.
-    void push(T&& value)
+    /// @param value Rvalue reference to element. Will be moved.
+    bool push(T&& value)
     {
-        Node* node = pool_.acquire();
-        node->data = std::move(value);
-        node->next = nullptr;
-
-        head_->next = node;
-        head_ = node;
-    }
-
-    /// @brief Pushes an element into the queue (copy version).
-    /// @param[in] value Const lvalue reference to element. Will be copied.
-    void push(const T& value)
-    {
-        Node* node = pool_.acquire();
-        node->data = value;  // Copy
-        node->next = nullptr;
-
-        head_->next = node;
-        head_ = node;
-    }
-
-    /// @brief Pushes an element with emplacement.
-    /// @param[in] args Arguments to forward to T's constructor.
-    template <typename... Args>
-    void emplace(Args&&... args)
-    {
-        Node* node = pool_.acquire(std::forward<Args>(args)...);
-        node->next = nullptr;
-
-        head_->next = node;
-        head_ = node;
-    }
-
-    /// @brief Pops an element from the queue.
-    /// @param[out] value Output parameter for the popped element.
-    /// @return true if an element was popped, false if queue was empty.
-    bool pop(T& value)
-    {
-        Node* next = tail_->next;
-        
-        if (next == nullptr)
+        Node* node = pool_.acquire(std::move(value));
+        if (!node)
         {
             return false;
         }
 
-        value = std::move(next->data);
+        node->next = nullptr;
+        head_->next = node;
+        head_ = node;
+        return true;
+    }
+
+    /// @brief Pushes an element into the queue (copy version).
+    /// @param value Const lvalue reference to element. Will be copied.
+    bool push(const T& value)
+    {
+        Node* node = pool_.acquire(value);
+        if (!node)
+        {
+            return false;
+        }
+
+        node->next = nullptr;
+        head_->next = node;
+        head_ = node;
+        return true;
+    }
+
+    /// @brief Pushes an element with emplacement.
+    /// @param args Arguments to forward to T's constructor.
+    template <typename... Args>
+    bool emplace(Args&&... args)
+    {
+        Node* node = pool_.acquire(std::forward<Args>(args)...);
+        if (!node)
+        {
+            return false;
+        }
+
+        node->next = nullptr;
+        head_->next = node;
+        head_ = node;
+        return true;
+    }
+
+    /// @brief Pops an element from the queue (without returning value).
+    void pop()
+    {
+        Node* next = tail_->next;
+        if (next == nullptr)
+        {
+            return;
+        }
+
         pool_.release(tail_);
         tail_ = next;
-        
-        return true;
     }
 
     /// @brief Returns the front element without removing it.
@@ -95,6 +121,7 @@ public:
     /// @pre Queue must not be empty.
     T& front()
     {
+        assert(tail_);
         return tail_->next->data;
     }
 
@@ -103,6 +130,7 @@ public:
     /// @pre Queue must not be empty.
     const T& front() const
     {
+        assert(tail_);
         return tail_->next->data;
     }
 
@@ -110,7 +138,7 @@ public:
     /// @return true if empty, false otherwise.
     bool empty() const
     {
-        return tail_->next == nullptr;
+        return (tail_ == nullptr) || (tail_->next == nullptr);
     }
 
     /// @brief Returns the number of elements in the queue.
@@ -118,11 +146,14 @@ public:
     size_t size() const
     {
         size_t count = 0;
-        Node* current = tail_->next;
-        while (current)
+        if (tail_)
         {
-            ++count;
-            current = current->next;
+            Node* current = tail_->next;
+            while (current)
+            {
+                ++count;
+                current = current->next;
+            }
         }
         return count;
     }
@@ -130,43 +161,46 @@ public:
     /// @brief Removes all elements from the queue.
     void clear() noexcept
     {
-        T dummy;
-        while (pop(dummy)) {}
+        while (tail_->next)
+        {
+            Node* next = tail_->next;
+            pool_.release(tail_);
+            tail_ = next;
+        }
     }
 
     /// @brief Swaps the contents with another queue.
-    /// @param[in] other Queue to swap with.
-    void swap(PooledQueue& other) noexcept
+    /// @param other Queue to swap with.
+    void swap(BasicPooledQueue& other) noexcept
     {
         std::swap(head_, other.head_);
         std::swap(tail_, other.tail_);
-        // Note: pools cannot be swapped as they may have different sizes
     }
 
     /// @brief Returns statistics about pool usage.
-    /// @return Pair of (pool_size, heap_nodes_count)
-    std::pair<size_t, size_t> pool_stats() const
+    /// @return Pair of (pool_size, used_nodes_count)
+    std::pair<size_t, size_t> poolStats() const
     {
-        return {pool_.poolSize(), pool_.heapNodesCount()};
+        return {pool_.poolSize() - 1, size()};
     }
 
 private:
-    NodePool<T, AllocPolicy> pool_;
-    Node* head_;  ///< Points to the last node (producer side)
-    Node* tail_;  ///< Points to the dummy node before first element
+    PoolType pool_;
+    Node* head_{nullptr}; ///< Points to the last node (producer side)
+    Node* tail_{nullptr}; ///< Points to the dummy node before first element
 };
 
 /// @brief Convenience alias for default heap-fallback policy
 template <typename T>
-using HeapPooledQueue = PooledQueue<T, HeapAllocationPolicy>;
+using ExpandPooledQueue = BasicPooledQueue<T, HeapAllocationPolicy>;
 
 /// @brief Convenience alias for no-heap policy
 template <typename T>
-using StrictPooledQueue = PooledQueue<T, StrictHeapPolicy>;
+using StrictPooledQueue = BasicPooledQueue<T, StrictHeapPolicy>;
 
 /// @brief Swaps two queues.
 template <typename T, typename AllocPolicy>
-void swap(PooledQueue<T, AllocPolicy>& lhs, PooledQueue<T, AllocPolicy>& rhs) noexcept
+void swap(BasicPooledQueue<T, AllocPolicy>& lhs, BasicPooledQueue<T, AllocPolicy>& rhs) noexcept
 {
     lhs.swap(rhs);
 }
