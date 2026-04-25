@@ -80,7 +80,6 @@ public:
             writeBuffer_.commitWrite(packer.position());
         }
 
-        // Отправляем
         ssize_t sent = transport_.sendBuffer(writeBuffer_, ec);
 
         if (sent < 0 && ec != std::errc::resource_unavailable_try_again)
@@ -91,7 +90,6 @@ public:
         return true;
     }
 
-    // Отправка сырых данных
     bool sendRaw(const uint8_t* data, size_t len, std::error_code& ec)
     {
         if (writeBuffer_.availableWrite() < len)
@@ -106,11 +104,9 @@ public:
         return sent > 0 || ec == std::errc::resource_unavailable_try_again;
     }
 
-    // Получение с распаковкой
     template <typename T>
     UnpackResult<T> receive(std::error_code& ec)
     {
-        // Если в буфере нет данных - читаем из сокета
         if (readBuffer_.availableRead() == 0)
         {
             ssize_t n = transport_.recvBuffer(readBuffer_, ec);
@@ -120,7 +116,6 @@ public:
             }
         }
 
-        // Распаковываем
         Unpacker unpacker(readBuffer_.getReadPtr(), readBuffer_.availableRead());
         auto result = T::unpack(unpacker);
 
@@ -132,7 +127,6 @@ public:
         return result;
     }
 
-    // Получение сырых данных
     std::optional<std::vector<uint8_t>> receiveRaw(size_t maxSize, std::error_code& ec)
     {
         if (readBuffer_.availableRead() == 0)
@@ -151,7 +145,6 @@ public:
         return result;
     }
 
-    // Отправка всех накопленных данных
     void flush(std::error_code& ec)
     {
         if (writeBuffer_.availableRead() > 0)
