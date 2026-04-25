@@ -26,23 +26,20 @@ int main()
 {
     std::error_code ec;
     GenericClient<UnixSocket> client;
-    
-    // Подключаемся
+
     if (!client.connect("/tmp/echo_server", -1, false, ec))
     {
         std::cerr << "Failed to connect: " << ec.message() << std::endl;
         return 1;
     }
-    
-    // Отправляем
+
     EchoMessage msg{"Hello, Server!"};
     if (!client.send(msg, ec))
     {
         std::cerr << "Failed to send: " << ec.message() << std::endl;
         return 1;
     }
-    
-    // Получаем ответ
+
     auto result = client.receive<EchoMessage>(ec);
     if (!result)
     {
