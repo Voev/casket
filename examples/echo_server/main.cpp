@@ -63,7 +63,7 @@ int main()
                                   });
 
     std::error_code ec{};
-    if (!server.listen("/tmp/echo_server", -1, 128, ec))
+    if (!server.listen("/tmp/echo_server.sock", -1, 128, ec))
     {
         std::cerr << "Failed to listen: " << ec.message() << std::endl;
         return 1;

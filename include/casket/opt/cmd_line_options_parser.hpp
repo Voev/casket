@@ -69,7 +69,7 @@ public:
     /// @param argv The command-line arguments as a C-style array of strings.
     void parse(int argc, char* argv[])
     {
-        std::vector<nonstd::string_view> args{(argc > 1 ? argv + 1 : argv), argv + argc};
+        std::vector<nonstd::string_view> args{argv + 1, argv + argc};
         auto allocatedArgs = preprocess(args);
         postprocess(allocatedArgs);
     }

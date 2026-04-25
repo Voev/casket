@@ -41,6 +41,14 @@ public:
         return msec.count();
     }
 
+    inline auto elapsedMicroSecs() const noexcept
+    {
+        assert(started_ == false);
+        auto elapsedTime = finish_ - start_;
+        auto usec = std::chrono::duration_cast<std::chrono::microseconds>(elapsedTime);
+        return usec.count();
+    }
+
     inline auto elapsedNanoSecs() const noexcept
     {
         assert(started_ == false);

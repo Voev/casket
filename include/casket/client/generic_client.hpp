@@ -57,16 +57,13 @@ public:
         return transport_.isValid();
     }
 
-    // Отправка с упаковкой
     template <typename T>
     bool send(const T& message, std::error_code& ec)
     {
-        // Пробуем упаковать в текущий буфер
         Packer packer(writeBuffer_.getWritePtr(), writeBuffer_.availableWrite());
 
         if (!message.pack(packer))
         {
-            // Не хватило места - расширяем и пробуем снова
             writeBuffer_.expand(writeBuffer_.capacity() * 2);
             Packer packer2(writeBuffer_.getWritePtr(), writeBuffer_.availableWrite());
 
@@ -75,6 +72,7 @@ public:
                 ec = std::make_error_code(std::errc::no_buffer_space);
                 return false;
             }
+
             writeBuffer_.commitWrite(packer2.position());
         }
         else
