@@ -2,7 +2,7 @@
 #include <array>
 #include <cstddef>
 #include <cassert>
-#include <casket/types/node_pool.hpp>
+#include <casket/types/object_pool.hpp>
 
 namespace casket
 {
@@ -17,16 +17,16 @@ template <typename Key, typename Value, size_t HASH_TABLE_SIZE = 16384>
 class LruCache final
 {
 private:
-    struct CachedValue
+    struct Node
     {
         Value value;
         Key key;
-        CachedValue* lruPrev{nullptr};
-        CachedValue* lruNext{nullptr};
-        CachedValue* hashNext{nullptr};
+        Node* lruPrev{nullptr};
+        Node* lruNext{nullptr};
+        Node* hashNext{nullptr};
 
         template <typename... Args>
-        CachedValue(Args&&... args)
+        Node(Args&&... args)
             : value(std::forward<Args>(args)...)
             , key()
             , lruPrev(nullptr)
@@ -35,17 +35,18 @@ private:
         {
         }
 
-        CachedValue() = default;
+        Node() = default;
     };
 
-    using PoolType = NodePool<CachedValue, StrictHeapPolicy>;
+    using PoolType = ObjectPool<Node, StrictHeapPolicy>;
 
 public:
-    explicit LruCache(const size_t poolSize)
-        : cachePool_(poolSize)
+    template <typename... Args>
+    explicit LruCache(const size_t poolSize, Args&&... args)
+        : pool_(poolSize, std::forward<Args>(args)...)
         , lruHead_(nullptr)
         , lruTail_(nullptr)
-        , cacheSize_(0)
+        , size_(0)
     {
         hashTable_.fill(nullptr);
     }
@@ -60,22 +61,19 @@ public:
     {
         remove(key);
 
-        auto* poolNode = cachePool_.acquire();
-        if (!poolNode)
+        auto* node = pool_.acquire(std::forward<Args>(args)...);
+        if (!node)
         {
-            if (cacheSize_ > 0)
+            if (size_ > 0)
             {
                 evictLRU();
-                poolNode = cachePool_.acquire();
+                node = pool_.acquire(std::forward<Args>(args)...);
             }
-            if (!poolNode)
+            if (!node)
             {
                 return nullptr;
             }
         }
-
-        new (&poolNode->data.value) Value(std::forward<Args>(args)...);
-        CachedValue* node = &poolNode->data;
 
         node->key = key;
         node->lruPrev = nullptr;
@@ -85,14 +83,14 @@ public:
         insertIntoHashTable(node);
         addToLRU(node);
 
-        cacheSize_++;
+        size_++;
 
         return &node->value;
     }
 
     Value* get(const Key& key)
     {
-        CachedValue* node = find(key);
+        Node* node = find(key);
         if (node)
         {
             touch(node);
@@ -103,7 +101,7 @@ public:
 
     void release(const Key& key)
     {
-        CachedValue* node = find(key);
+        Node* node = find(key);
         if (node)
         {
             touch(node);
@@ -112,7 +110,7 @@ public:
 
     bool remove(const Key& key)
     {
-        CachedValue* node = find(key);
+        Node* node = find(key);
         if (!node)
         {
             return false;
@@ -124,7 +122,7 @@ public:
 
     size_t size() const
     {
-        return cacheSize_;
+        return size_;
     }
 
     bool contains(const Key& key) const
@@ -136,16 +134,12 @@ public:
     {
         for (size_t i = 0; i < hashTable_.size(); ++i)
         {
-            CachedValue* node = hashTable_[i];
+            Node* node = hashTable_[i];
             while (node)
             {
-                CachedValue* next = node->hashNext;
+                Node* next = node->hashNext;
 
-                node->value.~Value();
-
-                auto* poolNode = reinterpret_cast<typename PoolType::Node*>(reinterpret_cast<char*>(node) -
-                                                                            offsetof(typename PoolType::Node, data));
-                cachePool_.release(poolNode);
+                pool_.release(node);
 
                 node = next;
             }
@@ -154,7 +148,7 @@ public:
         hashTable_.fill(nullptr);
         lruHead_ = nullptr;
         lruTail_ = nullptr;
-        cacheSize_ = 0;
+        size_ = 0;
     }
 
 private:
@@ -164,10 +158,10 @@ private:
         return std::hash<Key>{}(key) & (HASH_TABLE_SIZE - 1);
     }
 
-    CachedValue* find(const Key& key) const
+    Node* find(const Key& key) const
     {
         size_t h = hash(key);
-        CachedValue* node = hashTable_[h];
+        Node* node = hashTable_[h];
 
         while (node)
         {
@@ -180,18 +174,18 @@ private:
         return nullptr;
     }
 
-    void insertIntoHashTable(CachedValue* node)
+    void insertIntoHashTable(Node* node)
     {
         size_t h = hash(node->key);
         node->hashNext = hashTable_[h];
         hashTable_[h] = node;
     }
 
-    void removeFromHashTable(CachedValue* node)
+    void removeFromHashTable(Node* node)
     {
         size_t h = hash(node->key);
-        CachedValue* prev = nullptr;
-        CachedValue* current = hashTable_[h];
+        Node* prev = nullptr;
+        Node* current = hashTable_[h];
 
         while (current)
         {
@@ -212,7 +206,7 @@ private:
         }
     }
 
-    void addToLRU(CachedValue* node)
+    void addToLRU(Node* node)
     {
         node->lruPrev = nullptr;
         node->lruNext = lruHead_;
@@ -230,7 +224,7 @@ private:
         }
     }
 
-    void removeFromLRU(CachedValue* node)
+    void removeFromLRU(Node* node)
     {
         if (node->lruPrev)
         {
@@ -251,7 +245,7 @@ private:
         }
     }
 
-    void touch(CachedValue* node)
+    void touch(Node* node)
     {
         removeFromLRU(node);
         addToLRU(node);
@@ -265,26 +259,21 @@ private:
         }
     }
 
-    void removeFromCache(CachedValue* node)
+    void removeFromCache(Node* node)
     {
         removeFromHashTable(node);
         removeFromLRU(node);
 
-        node->value.~Value();
-
-        auto* poolNode = reinterpret_cast<typename PoolType::Node*>(reinterpret_cast<char*>(node) -
-                                                                    offsetof(typename PoolType::Node, data));
-        cachePool_.release(poolNode);
-
-        cacheSize_--;
+        pool_.release(node);
+        size_--;
     }
 
 private:
-    PoolType cachePool_;
-    std::array<CachedValue*, HASH_TABLE_SIZE> hashTable_;
-    CachedValue* lruHead_;
-    CachedValue* lruTail_;
-    size_t cacheSize_;
+    PoolType pool_;
+    std::array<Node*, HASH_TABLE_SIZE> hashTable_;
+    Node* lruHead_;
+    Node* lruTail_;
+    size_t size_;
 };
 
 } // namespace casket
