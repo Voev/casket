@@ -2,12 +2,12 @@
 #include <array>
 #include <cstddef>
 #include <cassert>
-#include <casket/types/node_pool.hpp>
+#include <casket/types/object_pool.hpp>
 
 namespace casket
 {
 
-template <typename Key, typename Value, size_t HASH_TABLE_SIZE = 16384>
+template <typename Key, typename Value, size_t HASH_TABLE_SIZE = 16384, typename AllocPolicy = StrictHeapPolicy>
 class PooledHashTable final
 {
 private:
@@ -28,17 +28,21 @@ private:
         HashNode() = default;
     };
 
-    using PoolType = NodePool<HashNode, StrictHeapPolicy>;
+    using PoolType = ObjectPool<HashNode, AllocPolicy>;
 
 public:
-    explicit PooledHashTable(const size_t poolSize)
-        : cachePool_(poolSize)
+    template <typename... Args>
+    explicit PooledHashTable(size_t poolSize, Args&&... args)
+        : pool_(poolSize, std::forward<Args>(args)...)
         , size_(0)
     {
         hashTable_.fill(nullptr);
     }
 
-    ~PooledHashTable() = default;
+    ~PooledHashTable() noexcept
+    {
+        clear();
+    }
 
     PooledHashTable(const PooledHashTable&) = delete;
     PooledHashTable& operator=(const PooledHashTable&) = delete;
@@ -48,14 +52,11 @@ public:
     {
         remove(key);
 
-        auto* poolNode = cachePool_.acquire();
-        if (!poolNode)
+        auto* node = pool_.acquire(std::forward<Args>(args)...);
+        if (!node)
         {
             return nullptr;
         }
-
-        new (&poolNode->data.value) Value(std::forward<Args>(args)...);
-        HashNode* node = &poolNode->data;
 
         node->key = key;
         node->hashNext = nullptr;
@@ -85,12 +86,7 @@ public:
         }
 
         removeFromHashTable(node);
-
-        node->value.~Value();
-
-        auto* poolNode = reinterpret_cast<typename PoolType::Node*>(reinterpret_cast<char*>(node) -
-                                                                    offsetof(typename PoolType::Node, data));
-        cachePool_.release(poolNode);
+        pool_.release(node);
 
         size_--;
         return true;
@@ -114,13 +110,7 @@ public:
             while (node)
             {
                 HashNode* next = node->hashNext;
-
-                node->value.~Value();
-
-                auto* poolNode = reinterpret_cast<typename PoolType::Node*>(reinterpret_cast<char*>(node) -
-                                                                            offsetof(typename PoolType::Node, data));
-                cachePool_.release(poolNode);
-
+                pool_.release(node);
                 node = next;
             }
         }
@@ -184,7 +174,7 @@ private:
     }
 
 private:
-    PoolType cachePool_;
+    PoolType pool_;
     std::array<HashNode*, HASH_TABLE_SIZE> hashTable_;
     size_t size_;
 };
