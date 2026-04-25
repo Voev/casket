@@ -5,6 +5,7 @@
 #include <memory>
 #include <sstream>
 #include <casket/opt/option_value_handler.hpp>
+#include <casket/opt/value_parser.hpp>
 #include <casket/utils/string.hpp>
 #include <casket/utils/exception.hpp>
 
@@ -41,37 +42,8 @@ public:
         ThrowIfTrue(args.size() < minTokens(), "not enough arguments");
         ThrowIfTrue(args.size() > maxTokens(), "too many arguments");
 
-        auto str = args.front();
-        T typedValue{};
-
-        if constexpr (std::is_same_v<T, bool>)
-        {
-            if (iequals(str, "true") || iequals(str, "yes"))
-            {
-                typedValue = true;
-            }
-            else if (iequals(str, "false") || iequals(str, "no"))
-            {
-                typedValue = false;
-            }
-            else
-            {
-                throw RuntimeError("could not parse bool value '{}'", str);
-            }
-            value = std::move(typedValue);
-        }
-        else
-        {
-            std::istringstream iss(str.data());
-            if (iss >> typedValue)
-            {
-                value = std::move(typedValue);
-            }
-            else
-            {
-                throw RuntimeError("could not parse value '{}'", str);
-            }
-        }
+        T parsedValue = ValueParser<T>::parse(args.front());
+        value = std::move(parsedValue);
     }
 
     /// @brief Notification callback for when the value is set.

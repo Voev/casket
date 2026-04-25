@@ -33,7 +33,7 @@ public:
     UnixSocket(UnixSocket&& other) noexcept
         : fd_(std::exchange(other.fd_, g_InvalidSocket))
         , isNonBlocking_(std::exchange(other.isNonBlocking_, false))
-    
+
     {
     }
 
@@ -44,7 +44,6 @@ public:
             closeImpl();
             fd_ = std::exchange(other.fd_, g_InvalidSocket);
             isNonBlocking_ = std::exchange(other.isNonBlocking_, false);
-    
         }
         return *this;
     }
@@ -200,7 +199,7 @@ private:
         return n;
     }
 
-        ssize_t recvImpl(uint8_t* buffer, size_t len, std::error_code& ec)
+    ssize_t recvImpl(uint8_t* buffer, size_t len, std::error_code& ec)
     {
         if (!isValidImpl())
         {
@@ -226,6 +225,46 @@ private:
         }
 
         return n;
+    }
+
+    ssize_t recvBufferImpl(ByteBuffer& buffer, std::error_code& ec) noexcept
+    {
+        size_t available;
+        uint8_t* ptr = buffer.prepareWrite(available);
+
+        if (available == 0)
+        {
+            buffer.expand(buffer.capacity() * 2);
+            ptr = buffer.prepareWrite(available);
+            if (available == 0)
+                return 0;
+        }
+        auto len = recvImpl(ptr, available, ec);
+
+        if (len > 0)
+        {
+            buffer.commitWrite(len);
+        }
+        return len;
+    }
+
+    ssize_t sendBufferImpl(ByteBuffer& buffer, std::error_code& ec) noexcept
+    {
+        size_t available;
+        const uint8_t* ptr = buffer.prepareRead(available);
+
+        if (available == 0)
+        {
+            return 0;
+        }
+
+        auto len = sendImpl(ptr, available, ec);
+
+        if (len > 0)
+        {
+            buffer.commitRead(len);
+        }
+        return len;
     }
 
     ssize_t sendmsgImpl(const struct msghdr* msg, int flags, std::error_code& ec)

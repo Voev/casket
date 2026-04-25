@@ -21,7 +21,7 @@ protected:
 
     void resetUnpacker()
     {
-        unpacker_ = std::make_unique<Unpacker>(buffer_.data(), packer_->size());
+        unpacker_ = std::make_unique<Unpacker>(buffer_.data(), packer_->position());
     }
 };
 

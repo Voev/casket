@@ -3,6 +3,7 @@
 #include <memory>
 #include <sstream>
 #include <casket/opt/option_value_handler.hpp>
+#include <casket/opt/value_parser.hpp>
 #include <casket/utils/string.hpp>
 #include <casket/utils/exception.hpp>
 
@@ -27,33 +28,8 @@ public:
 
         for (const auto& arg : args)
         {
-            T typedValue{};
-
-            if constexpr (std::is_same_v<T, bool>)
-            {
-                if (iequals(arg, "true") || iequals(arg, "yes"))
-                {
-                    typedValue = true;
-                }
-                else if (iequals(arg, "false") || iequals(arg, "no"))
-                {
-                    typedValue = false;
-                }
-                else
-                {
-                    throw RuntimeError("could not parse bool value '{}'", arg);
-                }
-            }
-            else
-            {
-                std::istringstream iss{arg};
-                if (!(iss >> typedValue))
-                {
-                    throw RuntimeError("could not parse value '{}'", arg);
-                }
-            }
-
-            values.push_back(std::move(typedValue));
+            T parsedValue = ValueParser<T>::parse(arg);
+            values.push_back(std::move(parsedValue));
         }
 
         value = std::move(values);
