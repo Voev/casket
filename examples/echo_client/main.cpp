@@ -1,51 +1,57 @@
 #include <iostream>
-#include <chrono>
-#include <thread>
-#include <cstring>
-
 #include <casket/transport/unix_socket.hpp>
-#include <casket/types/byte_buffer.hpp>
-#include <casket/utils/exception.hpp>
+#include <casket/client/generic_client.hpp>
 
 using namespace casket;
 
+struct EchoMessage
+{
+    std::string_view text;
+
+    PackResult<Packer*> pack(Packer& packer) const
+    {
+        return packer.pack(text);
+    }
+
+    static UnpackResult<EchoMessage> unpack(Unpacker& unpacker)
+    {
+        auto result = unpacker.unpackString();
+        if (!result)
+            return UnpackResult<EchoMessage>(UnpackerError::PrematureEnd);
+        return EchoMessage{result.value()};
+    }
+};
+
 int main()
 {
-    try
+    std::error_code ec;
+    GenericClient<UnixSocket> client;
+    
+    // Подключаемся
+    if (!client.connect("/tmp/echo_server", -1, false, ec))
     {
-        UnixSocket client;
-        std::error_code ec;
-        std::string socketPath = "/tmp/echo_server";
-
-        std::cout << "Connecting to " << socketPath << "..." << std::endl;
-        client.connect(socketPath, true, ec);
-        ThrowIfError(ec, "failed to connect");
-        std::cout << "Connected!" << std::endl;
-
-        std::string message(1024, 'A');
-        std::cout << "Sending: " << message << " (" << message.size() << " bytes)" << std::endl;
-        ssize_t sent = client.send(reinterpret_cast<const uint8_t*>(message.data()), message.size(), ec);
-        ThrowIfError(ec, "failed to send data");
-
-        std::cout << "Sent: " << sent << " bytes" << std::endl;
-
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-        uint8_t buffer[4096];
-        ssize_t received = client.recv(buffer, sizeof(buffer), ec);
-        client.close();
-        ThrowIfError(ec, "failed to get receive data");
-
-        if (received > 0)
-        {
-            std::cout << "Received: " << received << " bytes" << std::endl;
-            std::cout << "Response: " << std::string(reinterpret_cast<char*>(buffer), received) << std::endl;
-        }
+        std::cerr << "Failed to connect: " << ec.message() << std::endl;
+        return 1;
     }
-    catch (const std::exception& e)
+    
+    // Отправляем
+    EchoMessage msg{"Hello, Server!"};
+    if (!client.send(msg, ec))
     {
-        std::cerr << "ERROR: " << e.what() << std::endl;
-        return EXIT_FAILURE;
+        std::cerr << "Failed to send: " << ec.message() << std::endl;
+        return 1;
     }
-
-    return EXIT_SUCCESS;
+    
+    // Получаем ответ
+    auto result = client.receive<EchoMessage>(ec);
+    if (!result)
+    {
+        std::cerr << "Failed to receive: " << ec.message() << std::endl;
+        return 1;
+    }
+    
+    std::cout << "Response: " << result->text << std::endl;
+    
+    client.close();
+    return 0;
 }

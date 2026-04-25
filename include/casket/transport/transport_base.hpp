@@ -9,6 +9,8 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 
+#include <casket/transport/byte_buffer.hpp>
+
 namespace casket
 {
 
@@ -24,6 +26,16 @@ public:
     ssize_t recv(uint8_t* buffer, size_t length, std::error_code& ec) noexcept
     {
         return derived().recvImpl(buffer, length, ec);
+    }
+
+    ssize_t recvBuffer(ByteBuffer& buffer, std::error_code& ec) noexcept
+    {
+        return derived().recvBufferImpl(buffer, ec);
+    }
+
+    ssize_t sendBuffer(ByteBuffer& buffer, std::error_code& ec) noexcept
+    {
+        return derived().sendBufferImpl(buffer, ec);
     }
 
     ssize_t sendmsg(const struct msghdr* msg, int flags, std::error_code& ec) noexcept

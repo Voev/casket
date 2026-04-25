@@ -8,6 +8,26 @@
 
 using namespace casket;
 
+struct EchoMessage
+{
+    std::string_view text;
+
+    PackResult<Packer*> pack(Packer& packer) const
+    {
+        return packer.pack(text);
+    }
+
+    static UnpackResult<EchoMessage> unpack(Unpacker& unpacker)
+    {
+        auto result = unpacker.unpackString();
+        if (!result)
+        {
+            return UnpackResult<EchoMessage>(UnpackerError::PrematureEnd);
+        }
+        return EchoMessage{result.value()};
+    }
+};
+
 int main()
 {
     GenericServer<UnixSocket> server;
@@ -15,23 +35,22 @@ int main()
     std::atomic_bool interrupted{false};
 
     server.setConnectionHandler(
-        [](ByteBuffer& request, ByteBuffer& response)
+        [](Context<UnixSocket>& ctx)
         {
-            size_t available = request.availableRead();
-            if (available > 0)
+            std::error_code ec;
+            auto result = ctx.readThenUnpack<EchoMessage>(ec);
+            if (!result)
             {
-                auto data = request.peekContiguous(available);
-                
-                response.write(data.data(), data.size());
-                
-                request.consume(available);
+                std::cerr << "Error: " << (int)result.error() << std::endl;
+            }
+            else
+            {
+                std::cout << "Received: " << result->text << std::endl;
+                ctx.packThenSend(EchoMessage{result->text}, ec);
             }
         });
 
-    server.setErrorHandler([](const std::error_code& ec)
-    {
-        std::cout << "Error: " << ec.message() << std::endl;
-    });
+    server.setErrorHandler([](const std::error_code& ec) { std::cout << "Error: " << ec.message() << std::endl; });
 
     int signals[] = {SIGINT, SIGTERM};
 

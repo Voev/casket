@@ -59,7 +59,7 @@ public:
     {
     }
 
-    size_t size() const
+    size_t position() const
     {
         return pos_;
     }

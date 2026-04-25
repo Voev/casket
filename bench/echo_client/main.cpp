@@ -9,7 +9,7 @@
 #include <algorithm>
 
 #include <casket/transport/unix_socket.hpp>
-#include <casket/types/byte_buffer.hpp>
+#include <casket/transport/byte_buffer.hpp>
 
 using namespace casket;
 
@@ -86,7 +86,7 @@ public:
             ssize_t received = socket_.recv(buffer, sizeof(buffer), ec);
             if (received > 0)
             {
-                response.write(buffer, received);
+                //response.write(buffer, received);
             }
             else if (received == 0)
             {
