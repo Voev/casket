@@ -634,13 +634,11 @@ private:
 
         if (ctx->writeBuffer.availableRead() > 0)
         {
-            // Пытаемся отправить сразу
             std::error_code ec;
             ssize_t sent = ctx->transport.sendBuffer(ctx->writeBuffer, ec);
             
             if (sent > 0)
             {
-                // Частично отправилось - обновляем события
                 if (ctx->writeBuffer.availableRead() > 0)
                 {
                     updateEvents(ctx, true);
@@ -648,7 +646,6 @@ private:
             }
             else if (ec == std::errc::resource_unavailable_try_again)
             {
-                // Сокет не готов - добавляем Writable флаг
                 updateEvents(ctx, true);
             }
             else if (ec)
