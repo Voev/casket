@@ -6,7 +6,7 @@
 namespace casket
 {
 
-void WaitSocket(SocketType socket, bool read, std::chrono::milliseconds timeout, std::error_code& ec)
+inline void WaitSocket(SocketType socket, bool read, std::chrono::milliseconds timeout, std::error_code& ec)
 {
     if (socket == g_InvalidSocket)
     {
