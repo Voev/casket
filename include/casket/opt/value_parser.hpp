@@ -25,6 +25,15 @@ struct ValueParser
 };
 
 template <>
+struct ValueParser<std::string>
+{
+    static std::string parse(const std::string& str)
+    {
+        return str;
+    }
+};
+
+template <>
 struct ValueParser<bool>
 {
     static bool parse(const std::string& str)
