@@ -9,7 +9,6 @@
 
 using namespace casket;
 
-/// @brief Test fixture for MPSCQueue.
 template<typename T>
 class MPSCQueueTest : public ::testing::Test
 {
@@ -30,16 +29,14 @@ protected:
 using TestTypes = ::testing::Types<int, std::string, std::shared_ptr<int>>;
 TYPED_TEST_SUITE(MPSCQueueTest, TestTypes);
 
-/// @brief Tests that newly created queue is empty.
-TYPED_TEST(MPSCQueueTest, initiallyEmpty)
+TYPED_TEST(MPSCQueueTest, InitiallyEmpty)
 {
     TypeParam dummy;
     EXPECT_FALSE(this->queue->pop(dummy));
     EXPECT_TRUE(this->queue->empty());
 }
 
-/// @brief Tests single push and pop.
-TYPED_TEST(MPSCQueueTest, singlePushPop)
+TYPED_TEST(MPSCQueueTest, SinglePushPop)
 {
     TypeParam value{};
     this->queue->push(std::move(value));
@@ -51,8 +48,7 @@ TYPED_TEST(MPSCQueueTest, singlePushPop)
     EXPECT_TRUE(this->queue->empty());
 }
 
-/// @brief Tests multiple sequential pushes and pops.
-TYPED_TEST(MPSCQueueTest, multipleSequentialPushPop)
+TYPED_TEST(MPSCQueueTest, MultipleSequentialPushPop)
 {
     constexpr int numItems = 100;
     
@@ -71,8 +67,7 @@ TYPED_TEST(MPSCQueueTest, multipleSequentialPushPop)
     EXPECT_TRUE(this->queue->empty());
 }
 
-/// @brief Tests FIFO order preservation.
-TEST(MPSCQueueIntTest, fifoOrderPreserved)
+TEST(MPSCQueueIntTest, FifoOrderPreserved)
 {
     MPSCQueue<int> queue;
     constexpr int numItems = 1000;
@@ -90,8 +85,7 @@ TEST(MPSCQueueIntTest, fifoOrderPreserved)
     }
 }
 
-/// @brief Tests multiple producers and single consumer.
-TEST(MPSCQueueIntTest, multipleProducersSingleConsumer)
+TEST(MPSCQueueIntTest, MultipleProducersSingleConsumer)
 {
     MPSCQueue<int> queue;
     constexpr int numProducers = 4;
@@ -145,8 +139,7 @@ TEST(MPSCQueueIntTest, multipleProducersSingleConsumer)
     }
 }
 
-/// @brief Tests push from multiple threads with contention.
-TEST(MPSCQueueIntTest, highContentionMultipleProducers)
+TEST(MPSCQueueIntTest, HighContentionMultipleProducers)
 {
     MPSCQueue<int> queue;
     constexpr int numProducers = 8;
@@ -194,8 +187,7 @@ TEST(MPSCQueueIntTest, highContentionMultipleProducers)
     EXPECT_TRUE(queue.empty());
 }
 
-/// @brief Tests string queue with multiple producers.
-TEST(MPSCQueueStringTest, multipleProducersStrings)
+TEST(MPSCQueueStringTest, MultipleProducersStrings)
 {
     MPSCQueue<std::string> queue;
     constexpr int numProducers = 4;
@@ -244,8 +236,7 @@ TEST(MPSCQueueStringTest, multipleProducersStrings)
     EXPECT_TRUE(queue.empty());
 }
 
-/// @brief Tests clear operation.
-TEST(MPSCQueueIntTest, clearRemovesAllElements)
+TEST(MPSCQueueIntTest, ClearRemovesAllElements)
 {
     MPSCQueue<int> queue;
     constexpr int numItems = 100;
@@ -263,8 +254,7 @@ TEST(MPSCQueueIntTest, clearRemovesAllElements)
     EXPECT_FALSE(queue.pop(dummy));
 }
 
-/// @brief Tests pop on empty queue returns false.
-TEST(MPSCQueueIntTest, popOnEmptyQueueReturnsFalse)
+TEST(MPSCQueueIntTest, PopOnEmptyQueueReturnsFalse)
 {
     MPSCQueue<int> queue;
     int value;
@@ -276,8 +266,7 @@ TEST(MPSCQueueIntTest, popOnEmptyQueueReturnsFalse)
     EXPECT_FALSE(queue.pop(value));
 }
 
-/// @brief Tests queue with large number of elements.
-TEST(MPSCQueueIntTest, largeNumberOfElements)
+TEST(MPSCQueueIntTest, LargeNumberOfElements)
 {
     MPSCQueue<int> queue;
     constexpr int numItems = 100000;
@@ -297,8 +286,7 @@ TEST(MPSCQueueIntTest, largeNumberOfElements)
     EXPECT_TRUE(queue.empty());
 }
 
-/// @brief Tests that pool reuses nodes efficiently.
-TEST(MPSCQueueIntTest, nodePoolReuse)
+TEST(MPSCQueueIntTest, NodePoolReuse)
 {
     MPSCQueue<int> queue(100); // Small pool size
     
@@ -333,8 +321,7 @@ TEST(MPSCQueueIntTest, nodePoolReuse)
     }
 }
 
-/// @brief Tests concurrent push and pop with timeout.
-TEST(MPSCQueueIntTest, concurrentPushPopWithTimeout)
+TEST(MPSCQueueIntTest, ConcurrentPushPopWithTimeout)
 {
     MPSCQueue<int> queue;
     std::atomic<bool> producerDone{false};
@@ -376,8 +363,7 @@ TEST(MPSCQueueIntTest, concurrentPushPopWithTimeout)
     EXPECT_TRUE(queue.empty());
 }
 
-/// @brief Tests move-only types.
-TEST(MPSCQueueUniquePtrTest, moveOnlyTypeSupport)
+TEST(MPSCQueueUniquePtrTest, MoveOnlyTypeSupport)
 {
     MPSCQueue<std::unique_ptr<int>> queue;
     
@@ -398,8 +384,7 @@ TEST(MPSCQueueUniquePtrTest, moveOnlyTypeSupport)
     EXPECT_TRUE(queue.empty());
 }
 
-/// @brief Tests performance under high load.
-TEST(MPSCQueueIntTest, performanceUnderHighLoad)
+TEST(MPSCQueueIntTest, PerformanceUnderHighLoad)
 {
     MPSCQueue<int> queue;
     constexpr int numProducers = 4;
