@@ -36,22 +36,14 @@ public:
     /// @param args Arguments to initialize all nodes in the pool (including stub)
     template <typename... Args>
     explicit BasicPooledQueue(size_t poolSize, Args&&... args)
-        : pool_(poolSize + 1, std::forward<Args>(args)...)
+        : pool_(poolSize, std::forward<Args>(args)...)
     {
-        Node* stub = pool_.acquire();
-        if (stub)
-        {
-            stub->next = nullptr;
-            head_ = stub;
-            tail_ = stub;
-        }
     }
 
     /// @brief Destructor. Clears all elements and releases resources.
     ~BasicPooledQueue() noexcept
     {
         clear();
-        pool_.release(head_);
     }
 
     /// @brief Pushes an element into the queue (move version).
@@ -65,8 +57,17 @@ public:
         }
 
         node->next = nullptr;
-        head_->next = node;
-        head_ = node;
+
+        if (empty())
+        {
+            head_ = node;
+            tail_ = node;
+        }
+        else
+        {
+            tail_->next = node;
+            tail_ = node;
+        }
         return true;
     }
 
@@ -81,8 +82,17 @@ public:
         }
 
         node->next = nullptr;
-        head_->next = node;
-        head_ = node;
+        
+        if (empty())
+        {
+            head_ = node;
+            tail_ = node;
+        }
+        else
+        {
+            tail_->next = node;
+            tail_ = node;
+        }
         return true;
     }
 
@@ -98,22 +108,37 @@ public:
         }
 
         node->next = nullptr;
-        head_->next = node;
-        head_ = node;
+        
+        if (empty())
+        {
+            head_ = node;
+            tail_ = node;
+        }
+        else
+        {
+            tail_->next = node;
+            tail_ = node;
+        }
         return true;
     }
 
     /// @brief Pops an element from the queue (without returning value).
     void pop()
     {
-        Node* next = tail_->next;
-        if (next == nullptr)
+        if (empty())
         {
             return;
         }
 
-        pool_.release(tail_);
-        tail_ = next;
+        Node* toRemove = head_;
+        head_ = head_->next;
+
+        if (head_ == nullptr)
+        {
+            tail_ = nullptr;
+        }
+
+        pool_.release(toRemove);
     }
 
     /// @brief Returns the front element without removing it.
@@ -121,8 +146,8 @@ public:
     /// @pre Queue must not be empty.
     T& front()
     {
-        assert(tail_);
-        return tail_->next->data;
+        assert(head_);
+        return head_->data;
     }
 
     /// @brief Returns the front element without removing it (const version).
@@ -130,15 +155,15 @@ public:
     /// @pre Queue must not be empty.
     const T& front() const
     {
-        assert(tail_);
-        return tail_->next->data;
+        assert(head_);
+        return head_->data;
     }
 
     /// @brief Checks whether the queue is empty.
     /// @return true if empty, false otherwise.
     bool empty() const
     {
-        return (tail_ == nullptr) || (tail_->next == nullptr);
+        return (head_ == nullptr);
     }
 
     /// @brief Returns the number of elements in the queue.
@@ -146,14 +171,11 @@ public:
     size_t size() const
     {
         size_t count = 0;
-        if (tail_)
+        Node* current = head_;
+        while (current)
         {
-            Node* current = tail_->next;
-            while (current)
-            {
-                ++count;
-                current = current->next;
-            }
+            ++count;
+            current = current->next;
         }
         return count;
     }
@@ -161,27 +183,17 @@ public:
     /// @brief Removes all elements from the queue.
     void clear() noexcept
     {
-        while (tail_->next)
+        while (!empty())
         {
-            Node* next = tail_->next;
-            pool_.release(tail_);
-            tail_ = next;
+            pop();
         }
-    }
-
-    /// @brief Swaps the contents with another queue.
-    /// @param other Queue to swap with.
-    void swap(BasicPooledQueue& other) noexcept
-    {
-        std::swap(head_, other.head_);
-        std::swap(tail_, other.tail_);
     }
 
     /// @brief Returns statistics about pool usage.
     /// @return Pair of (pool_size, used_nodes_count)
     std::pair<size_t, size_t> poolStats() const
     {
-        return {pool_.poolSize() - 1, size()};
+        return {pool_.poolSize(), size()};
     }
 
 private:

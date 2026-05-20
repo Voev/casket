@@ -132,29 +132,6 @@ TEST(PooledQueueTest, Clear)
     EXPECT_EQ(queue.size(), 0);
 }
 
-TEST(PooledQueueTest, Swap)
-{
-    StrictPooledQueue<int> queue1(10);
-    StrictPooledQueue<int> queue2(10);
-    
-    queue1.push(1);
-    queue1.push(2);
-    queue2.push(3);
-    queue2.push(4);
-    
-    queue1.swap(queue2);
-    
-    EXPECT_EQ(queue1.front(), 3);
-    queue1.pop();
-    EXPECT_EQ(queue1.front(), 4);
-    queue1.pop();
-    
-    EXPECT_EQ(queue2.front(), 1);
-    queue2.pop();
-    EXPECT_EQ(queue2.front(), 2);
-    queue2.pop();
-}
-
 TEST(PooledQueueTest, PoolSizeSmall)
 {
     StrictPooledQueue<int> queue(2);

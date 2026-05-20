@@ -165,7 +165,7 @@ TEST_F(SequenceLockTest, SingleWriterMultipleReaders)
                 int last_value = -1;
                 while (running)
                 {
-                    int value;
+                    int value = 0;
                     lock.load(value);
                     if (value < last_value)
                     {
@@ -244,7 +244,7 @@ TEST_F(SequenceLockTest, ConcurrentStoreSameValue)
             while (!start) {}
             for (int i = 0; i < 10000; ++i)
             {
-                int value;
+                int value = 0;
                 lock.load(value);
                 // Reader might see any value, just verify it's in range
                 if (value < 0 || value >= 10)
