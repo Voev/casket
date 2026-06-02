@@ -161,12 +161,12 @@ public:
 
     /// @brief Retrieves a value by key and updates its LRU position.
     /// @param[in] key key to look up.
+    /// @param[in] now time point to expiry.
+    ///
     /// @return pointer to the value, or nullptr if key not found or expired.
     /// @note The returned pointer is valid until the element is erased or the cache is modified.
-    Value* get(const Key& key)
+    Value* get(const Key& key, const std::chrono::steady_clock::time_point& now = std::chrono::steady_clock::now())
     {
-        auto now = std::chrono::steady_clock::now();
-
         int* indexPtr = keyToIndex_.find(key);
         if (!indexPtr)
             return nullptr;
