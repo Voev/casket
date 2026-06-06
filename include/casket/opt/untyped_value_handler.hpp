@@ -18,9 +18,10 @@ public:
     ///
     /// @param value Reference to `std::any` where the result would normally be
     /// stored.
-    /// @param args List of string arguments intended for parsing.
-    void parse(std::any&, const std::vector<std::string>&) override
+    /// @param args Span of string_view arguments intended for parsing.
+    void parse(nonstd::any&, nonstd::span<const nonstd::string_view>) override
     {
+        // Nothing to parse - untyped handler ignores all arguments
     }
 
     /// @brief No-op notify implementation.
@@ -28,8 +29,9 @@ public:
     /// This method does nothing since there is no actual value to notify about.
     ///
     /// @param valueStore The value that was supposedly set, unused.
-    void notify(const std::any&) const override
+    void notify(const nonstd::any&) const override
     {
+        // Nothing to notify - no stored value
     }
 
     /// @brief Returns 0 as the minimum number of tokens.
