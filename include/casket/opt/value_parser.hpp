@@ -1,4 +1,3 @@
-// value_parser.hpp
 #pragma once
 
 #include <sstream>
@@ -16,9 +15,6 @@
 namespace casket::opt
 {
 
-// ============================================================================
-// Базовый шаблон (fallback)
-// ============================================================================
 template <typename T, typename Enable = void>
 struct ValueParserImpl
 {
@@ -34,9 +30,6 @@ struct ValueParserImpl
     }
 };
 
-// ============================================================================
-// Вспомогательные трейты
-// ============================================================================
 template <typename T>
 struct is_integer : std::false_type
 {
@@ -112,19 +105,16 @@ public:
             throw RuntimeError("empty integer value");
         }
 
-        // Проверка на отрицательное для беззнаковых
         if (std::is_unsigned<T>::value && !str.empty() && str[0] == '-')
         {
             throw RuntimeError("unsigned type cannot be negative: '{}'", str);
         }
 
-        // Пропускаем пробелы в начале
         while (!str.empty() && std::isspace(static_cast<unsigned char>(str.front())))
         {
             str.remove_prefix(1);
         }
         
-        // Пропускаем пробелы в конце
         while (!str.empty() && std::isspace(static_cast<unsigned char>(str.back())))
         {
             str.remove_suffix(1);
@@ -197,7 +187,6 @@ public:
             throw RuntimeError("empty float value");
         }
 
-        // Пропускаем пробелы
         while (!str.empty() && std::isspace(static_cast<unsigned char>(str.front())))
         {
             str.remove_prefix(1);
@@ -231,9 +220,6 @@ public:
     }
 };
 
-// ============================================================================
-// Специализация для целых чисел
-// ============================================================================
 template <typename T>
 struct ValueParserImpl<T, typename std::enable_if<is_integer<T>::value>::type>
 {
@@ -243,9 +229,6 @@ struct ValueParserImpl<T, typename std::enable_if<is_integer<T>::value>::type>
     }
 };
 
-// ============================================================================
-// Специализация для чисел с плавающей точкой
-// ============================================================================
 template <typename T>
 struct ValueParserImpl<T, typename std::enable_if<is_floating_point<T>::value>::type>
 {
@@ -255,9 +238,6 @@ struct ValueParserImpl<T, typename std::enable_if<is_floating_point<T>::value>::
     }
 };
 
-// ============================================================================
-// Специализация для bool
-// ============================================================================
 template <>
 struct ValueParserImpl<bool, void>
 {
@@ -268,7 +248,6 @@ struct ValueParserImpl<bool, void>
             throw RuntimeError("empty bool value");
         }
 
-        // Пропускаем пробелы
         while (!str.empty() && std::isspace(static_cast<unsigned char>(str.front())))
         {
             str.remove_prefix(1);
@@ -313,15 +292,11 @@ struct ValueParserImpl<bool, void>
     }
 };
 
-// ============================================================================
-// Специализация для std::string
-// ============================================================================
 template <>
 struct ValueParserImpl<std::string, void>
 {
     static std::string parse(nonstd::string_view str)
     {
-        // Пропускаем пробелы
         while (!str.empty() && std::isspace(static_cast<unsigned char>(str.front())))
         {
             str.remove_prefix(1);
@@ -331,13 +306,11 @@ struct ValueParserImpl<std::string, void>
             str.remove_suffix(1);
         }
 
-        // Удаляем кавычки
         if (str.size() >= 2 &&
             ((str.front() == '"' && str.back() == '"') || (str.front() == '\'' && str.back() == '\'')))
         {
             str = str.substr(1, str.size() - 2);
 
-            // Обрабатываем escape последовательности
             std::string result;
             result.reserve(str.size());
 
@@ -385,9 +358,6 @@ struct ValueParserImpl<std::string, void>
     }
 };
 
-// ============================================================================
-// Специализация для std::chrono::milliseconds
-// ============================================================================
 template <>
 struct ValueParserImpl<std::chrono::milliseconds, void>
 {
@@ -398,7 +368,6 @@ struct ValueParserImpl<std::chrono::milliseconds, void>
             throw RuntimeError("empty duration string");
         }
 
-        // Пропускаем пробелы
         while (!str.empty() && std::isspace(static_cast<unsigned char>(str.front())))
         {
             str.remove_prefix(1);
@@ -453,9 +422,6 @@ struct ValueParserImpl<std::chrono::milliseconds, void>
     }
 };
 
-// ============================================================================
-// Основной интерфейс ValueParser
-// ============================================================================
 template <typename T>
 struct ValueParser
 {

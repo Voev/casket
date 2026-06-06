@@ -25,10 +25,8 @@ public:
     {
     }
 
-    // New interface: parse from span of string_view
     void parse(nonstd::any& value, nonstd::span<const nonstd::string_view> args) override
     {
-        // Validate count first
         if (args.size() < minCount_)
         {
             ThrowIfTrue(true, "Expected at least {} value(s), got {}", minCount_, args.size());
@@ -110,7 +108,6 @@ private:
     std::size_t maxCount_;
 };
 
-// Factory functions
 template <class T>
 std::shared_ptr<MultiOptionValueHandler<T>> MultiValue()
 {
