@@ -10,8 +10,9 @@
 #include <iomanip>
 #include <stdexcept>
 #include <string>
-#include <casket/nonstd/string_view.hpp>
 #include <vector>
+#include <casket/nonstd/span.hpp>
+#include <casket/nonstd/string_view.hpp>
 
 #include <casket/opt/option.hpp>
 #include <casket/utils/noncopyable.hpp>
@@ -221,25 +222,49 @@ private:
                 auto nextArg = std::next(arg);
                 auto& option = foundOption->second;
 
-                std::vector<std::string> values;
-                while (nextArg != end && values.size() < option->maxTokens() && !startsWith(*nextArg, "--"))
+                const auto maxTokens = option->maxTokens();
+                const auto minTokens = option->minTokens();
+
+                if (maxTokens == 0)
+                {
+                    if (nextArg != end && !startsWith(*nextArg, "--"))
+                    {
+                        throw RuntimeError("Option '{}' does not accept any values, but got '{}'", optionName,
+                                           *nextArg);
+                    }
+
+                    if (minTokens > 0)
+                    {
+                        throw RuntimeError("Option '{}' requires at least {} value(s), but maxTokens is 0", optionName,
+                                           minTokens);
+                    }
+
+                    option->consume({});
+                    arg = nextArg;
+                    continue;
+                }
+
+                std::vector<nonstd::string_view> values;
+
+                while (nextArg != end && values.size() < maxTokens && !startsWith(*nextArg, "--"))
                 {
                     values.push_back(*nextArg);
                     ++nextArg;
                 }
 
-                if (values.size() < option->minTokens())
+                if (values.size() < minTokens)
                 {
-                    throw RuntimeError("Option '{}' requires at least {} values", optionName,
-                                              option->minTokens());
+                    throw RuntimeError("Option '{}' requires at least {} value(s), got {}", optionName, minTokens,
+                                       values.size());
                 }
 
-                if (option->maxTokens() > 0 && values.size() > option->maxTokens())
+                if (values.size() > maxTokens)
                 {
-                    throw RuntimeError("Option '{}' accepts at most {} values", optionName, option->maxTokens());
+                    throw RuntimeError("Option '{}' accepts at most {} value(s), got {}", optionName, maxTokens,
+                                       values.size());
                 }
 
-                option->consume(values);
+                option->consume(nonstd::span<const nonstd::string_view>(values));
                 arg = nextArg;
             }
             else

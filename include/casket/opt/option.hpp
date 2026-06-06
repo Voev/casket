@@ -6,11 +6,13 @@
 #include <vector>
 #include <sstream>
 
-#include <casket/opt/untyped_value_handler.hpp>
-#include <casket/opt/typed_value_handler.hpp>
-
 #include <casket/utils/string.hpp>
 #include <casket/utils/exception.hpp>
+
+#include <casket/nonstd/optional.hpp>
+
+#include <casket/opt/option_value_handler.hpp>
+#include <casket/opt/untyped_value_handler.hpp>
 
 namespace casket::opt
 {
@@ -116,10 +118,10 @@ public:
         return description_;
     }
 
-    void consume(const std::vector<std::string>& args)
+    void consume(nonstd::span<const nonstd::string_view> arg)
     {
         ThrowIfTrue(isUsed_, "{}: option has already been processed", name_);
-        valueHandler_->parse(value_, args);
+        valueHandler_->parse(value_, arg);
         isUsed_ = true;
     }
 
@@ -127,17 +129,17 @@ public:
     T get() const
     {
         ThrowIfFalse(value_.has_value(), "{}: no value provided", name_);
-        return std::any_cast<T>(value_);
+        return nonstd::any_cast<T>(value_);
     }
 
     template <typename T>
-    std::optional<T> present() const
+    nonstd::optional<T> present() const
     {
         if (!value_.has_value())
         {
             return std::nullopt;
         }
-        return std::any_cast<T>(value_);
+        return nonstd::any_cast<T>(value_);
     }
 
     void validate()
@@ -171,8 +173,8 @@ public:
 private:
     std::string name_;
     std::string description_;
-    std::any defaultValue_;
-    std::any value_;
+    nonstd::any defaultValue_;
+    nonstd::any value_;
     std::shared_ptr<OptionValueHandler> valueHandler_;
     bool isRequired_;
     bool isUsed_;
