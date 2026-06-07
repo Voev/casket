@@ -297,63 +297,6 @@ struct ValueParserImpl<std::string, void>
 {
     static std::string parse(nonstd::string_view str)
     {
-        while (!str.empty() && std::isspace(static_cast<unsigned char>(str.front())))
-        {
-            str.remove_prefix(1);
-        }
-        while (!str.empty() && std::isspace(static_cast<unsigned char>(str.back())))
-        {
-            str.remove_suffix(1);
-        }
-
-        if (str.size() >= 2 &&
-            ((str.front() == '"' && str.back() == '"') || (str.front() == '\'' && str.back() == '\'')))
-        {
-            str = str.substr(1, str.size() - 2);
-
-            std::string result;
-            result.reserve(str.size());
-
-            for (size_t i = 0; i < str.size(); ++i)
-            {
-                if (str[i] == '\\' && i + 1 < str.size())
-                {
-                    char next = str[i + 1];
-                    switch (next)
-                    {
-                    case 'n':
-                        result += '\n';
-                        break;
-                    case 't':
-                        result += '\t';
-                        break;
-                    case 'r':
-                        result += '\r';
-                        break;
-                    case '\\':
-                        result += '\\';
-                        break;
-                    case '"':
-                        result += '"';
-                        break;
-                    case '\'':
-                        result += '\'';
-                        break;
-                    default:
-                        result += next;
-                        break;
-                    }
-                    ++i;
-                }
-                else
-                {
-                    result += str[i];
-                }
-            }
-
-            return result;
-        }
-
         return std::string(str);
     }
 };

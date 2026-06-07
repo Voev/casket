@@ -16,12 +16,6 @@ public:
 
     virtual void parse(nonstd::any& value, nonstd::span<const nonstd::string_view> arg) = 0;
 
-    virtual void parse(nonstd::any& value, const std::string& arg)
-    {
-        nonstd::string_view view(arg);
-        parse(value, nonstd::span<const nonstd::string_view>(&view, 1));
-    }
-
     virtual void notify(const nonstd::any& valueStore) const = 0;
 
     virtual std::size_t minTokens() const = 0;
