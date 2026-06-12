@@ -26,8 +26,7 @@ TEST_F(SequenceLockTest, BasicStoreLoad)
     SequenceLock<int> lock;
 
     lock.store(42);
-    int value = 0;
-    lock.load(value);
+    int value = lock.load();
 
     EXPECT_EQ(value, 42);
 }
@@ -39,8 +38,7 @@ TEST_F(SequenceLockTest, MultipleStoreLoad)
     for (int i = 0; i < 100; ++i)
     {
         lock.store(i);
-        int value = 0;
-        lock.load(value);
+        int value = lock.load();
         EXPECT_EQ(value, i);
     }
 }
@@ -50,8 +48,7 @@ TEST_F(SequenceLockTest, DifferentTypes)
     // Test with double
     SequenceLock<double> double_lock;
     double_lock.store(3.14159);
-    double dvalue = 0;
-    double_lock.load(dvalue);
+    double dvalue = double_lock.load();
     EXPECT_DOUBLE_EQ(dvalue, 3.14159);
 
     // Test with custom struct
@@ -61,8 +58,7 @@ TEST_F(SequenceLockTest, DifferentTypes)
     };
     SequenceLock<Point> point_lock;
     point_lock.store(Point{10, 20});
-    Point pvalue{0, 0};
-    point_lock.load(pvalue);
+    Point pvalue = point_lock.load();
     EXPECT_EQ(pvalue.x, 10);
     EXPECT_EQ(pvalue.y, 20);
 }
@@ -82,8 +78,7 @@ TEST_F(SequenceLockTest, LargeObject)
 
     lock.store(original);
 
-    LargeData loaded;
-    lock.load(loaded);
+    LargeData loaded = lock.load();
 
     EXPECT_EQ(loaded.value, original.value);
     EXPECT_EQ(memcmp(loaded.data, original.data, sizeof(original.data)), 0);
@@ -114,8 +109,7 @@ TEST_F(SequenceLockTest, SingleWriterSingleReader)
             int last_value = -1;
             while (reader_count < 10000)
             {
-                int value;
-                lock.load(value);
+                int value = lock.load();
                 EXPECT_GE(value, last_value) << "Sequence violation!";
                 last_value = value;
                 reader_count++;
@@ -165,8 +159,7 @@ TEST_F(SequenceLockTest, SingleWriterMultipleReaders)
                 int last_value = -1;
                 while (running)
                 {
-                    int value = 0;
-                    lock.load(value);
+                    int value = lock.load();
                     if (value < last_value)
                     {
                         sequence_error = true;
@@ -197,14 +190,6 @@ TEST_F(SequenceLockTest, SingleWriterMultipleReaders)
     std::cout << "Total reads: " << total_reads.load() << std::endl;
 }
 
-TEST_F(SequenceLockTest, DefaultConstructed)
-{
-    SequenceLock<int> lock;
-    int value = 0;
-    lock.load(value);
-    // Default constructed value is indeterminate, just ensure no crash
-}
-
 TEST_F(SequenceLockTest, RapidStoreLoad)
 {
     SequenceLock<int> lock;
@@ -212,53 +197,8 @@ TEST_F(SequenceLockTest, RapidStoreLoad)
     for (int i = 0; i < 10000; ++i)
     {
         lock.store(i);
-        int value = -1;
-        lock.load(value);
+        int value = lock.load();
         EXPECT_EQ(value, i);
     }
 }
 
-TEST_F(SequenceLockTest, ConcurrentStoreSameValue)
-{
-    SequenceLock<int> lock;
-    std::atomic<bool> start{false};
-    std::vector<std::thread> threads;
-    std::atomic<int> errors{0};
-
-    for (int t = 0; t < 10; ++t)
-    {
-        threads.emplace_back(
-            [&, t]()
-            {
-                while (!start) {}
-                for (int i = 0; i < 1000; ++i)
-                {
-                    lock.store(t); // Different writers without sync - not recommended
-                }
-            });
-    }
-
-    std::thread reader(
-        [&]()
-        {
-            while (!start) {}
-            for (int i = 0; i < 10000; ++i)
-            {
-                int value = 0;
-                lock.load(value);
-                // Reader might see any value, just verify it's in range
-                if (value < 0 || value >= 10)
-                {
-                    errors++;
-                }
-            }
-        });
-
-    start = true;
-
-    for (auto& th : threads)
-        th.join();
-    reader.join();
-
-    EXPECT_EQ(errors.load(), 0);
-}

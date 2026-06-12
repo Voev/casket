@@ -5,7 +5,6 @@
 #include <atomic>
 #include <thread>
 #include <casket/lock_free/lf_object_pool.hpp>
-#include <casket/concurrency/sequence_lock.hpp>
 
 namespace casket::lf
 {
@@ -19,51 +18,49 @@ private:
         Key key;
         Value value;
         std::atomic<HashNode*> hashNext{nullptr};
+        std::atomic<bool> deleted{false};
 
-        // Default constructor
         HashNode() = default;
 
-        // Constructor for creating node with key and value arguments
         template <typename K, typename... Args>
         HashNode(K&& key, Args&&... args)
             : key(std::forward<K>(key))
             , value(std::forward<Args>(args)...)
             , hashNext(nullptr)
+            , deleted(false)
         {
         }
 
-        // Move constructor
         HashNode(HashNode&& other) noexcept
             : key(std::move(other.key))
             , value(std::move(other.value))
             , hashNext(other.hashNext.load())
+            , deleted(other.deleted.load())
         {
         }
 
-        // Disable copy
         HashNode(const HashNode&) = delete;
         HashNode& operator=(const HashNode&) = delete;
     };
 
     struct Bucket
     {
-        SequenceLock<HashNode*> headLock;
+        std::atomic<HashNode*> head{nullptr};
 
-        Bucket()
+        HashNode* getHeadSafe() const
         {
-            headLock.store(nullptr);
-        }
-
-        HashNode* getHeadSafe()
-        {
-            HashNode* h = nullptr;
-            headLock.load(h);
-            return h;
+            return head.load(std::memory_order_acquire);
         }
 
         void setHeadSafe(HashNode* node)
         {
-            headLock.store(node);
+            head.store(node, std::memory_order_release);
+        }
+
+        bool casHead(HashNode*& expected, HashNode* desired)
+        {
+            return head.compare_exchange_strong(expected, desired, std::memory_order_release,
+                                                std::memory_order_acquire);
         }
     };
 
@@ -93,7 +90,7 @@ public:
 
         while (node)
         {
-            if (node->key == key)
+            if (!node->deleted.load(std::memory_order_acquire) && node->key == key)
             {
                 return &node->value;
             }
@@ -105,8 +102,7 @@ public:
 
     Value* put(const Key& key, Value&& value)
     {
-        Value* existing = get(key);
-        if (existing)
+        if (get(key) != nullptr)
         {
             return nullptr;
         }
@@ -117,48 +113,36 @@ public:
             return nullptr;
         }
 
-        node->value = std::move(value);
-        node->key = key;
-        node->hashNext.store(nullptr, std::memory_order_relaxed);
+        new (node) HashNode(key, std::move(value));
+        node->deleted.store(false, std::memory_order_relaxed);
 
         size_t h = hash(key);
         Bucket& bucket = buckets_[h];
 
-        HashNode* oldHead = bucket.getHeadSafe();
-        node->hashNext.store(oldHead, std::memory_order_relaxed);
-        bucket.setHeadSafe(node);
+        while (true)
+        {
+            HashNode* oldHead = bucket.getHeadSafe();
+            node->hashNext.store(oldHead, std::memory_order_relaxed);
 
-        size_.fetch_add(1, std::memory_order_relaxed);
-        return &node->value;
+            if (bucket.casHead(oldHead, node))
+            {
+                size_.fetch_add(1, std::memory_order_release);
+                return &node->value;
+            }
+
+            if (get(key) != nullptr)
+            {
+                pool_.release(node);
+                return nullptr;
+            }
+
+            std::this_thread::yield();
+        }
     }
 
     Value* put(const Key& key, const Value& value)
     {
-        Value* existing = get(key);
-        if (existing)
-        {
-            return nullptr;
-        }
-
-        auto* node = pool_.acquire();
-        if (!node)
-        {
-            return nullptr;
-        }
-
-        node->value = value;
-        node->key = key;
-        node->hashNext.store(nullptr, std::memory_order_relaxed);
-
-        size_t h = hash(key);
-        Bucket& bucket = buckets_[h];
-
-        HashNode* oldHead = bucket.getHeadSafe();
-        node->hashNext.store(oldHead, std::memory_order_relaxed);
-        bucket.setHeadSafe(node);
-
-        size_.fetch_add(1, std::memory_order_relaxed);
-        return &node->value;
+        return put(key, Value(value));
     }
 
     bool remove(const Key& key)
@@ -166,34 +150,41 @@ public:
         size_t h = hash(key);
         Bucket& bucket = buckets_[h];
 
-        HashNode* head = bucket.getHeadSafe();
-
-        if (!head)
-        {
-            return false;
-        }
-
-        if (head->key == key)
-        {
-            HashNode* newHead = head->hashNext.load(std::memory_order_acquire);
-            bucket.setHeadSafe(newHead);
-            pool_.release(head);
-            size_.fetch_sub(1, std::memory_order_relaxed);
-            return true;
-        }
-
-        HashNode* prev = head;
-        HashNode* current = head->hashNext.load(std::memory_order_acquire);
-
+        HashNode* prev = nullptr;
+        HashNode* current = bucket.getHeadSafe();
+        
         while (current)
         {
-            if (current->key == key)
+            if (!current->deleted.load(std::memory_order_acquire) && current->key == key)
             {
-                HashNode* next = current->hashNext.load(std::memory_order_acquire);
-                prev->hashNext.store(next, std::memory_order_release);
-                pool_.release(current);
-                size_.fetch_sub(1, std::memory_order_relaxed);
-                return true;
+                bool expected = false;
+                if (current->deleted.compare_exchange_strong(expected, true,
+                                                              std::memory_order_release,
+                                                              std::memory_order_acquire))
+                {
+                    HashNode* next = current->hashNext.load(std::memory_order_acquire);
+                    
+                    if (prev)
+                    {
+                        // Remove middle
+                        prev->hashNext.store(next, std::memory_order_release);
+                    }
+                    else
+                    {
+                        // Remove head - need CAS
+                        if (!bucket.casHead(current, next))
+                        {
+                            size_.fetch_sub(1, std::memory_order_release);
+                            pool_.release(current);
+                            return true;
+                        }
+                    }
+                    
+                    size_.fetch_sub(1, std::memory_order_release);
+                    pool_.release(current);
+                    return true;
+                }
+                return false;
             }
             prev = current;
             current = current->hashNext.load(std::memory_order_acquire);
@@ -237,7 +228,10 @@ public:
             HashNode* node = bucket.getHeadSafe();
             while (node)
             {
-                func(node->key, node->value);
+                if (!node->deleted.load(std::memory_order_acquire))
+                {
+                    func(node->key, node->value);
+                }
                 node = node->hashNext.load(std::memory_order_acquire);
             }
         }
@@ -251,7 +245,10 @@ public:
             HashNode* node = bucket.getHeadSafe();
             while (node)
             {
-                func(node->key, node->value);
+                if (!node->deleted.load(std::memory_order_acquire))
+                {
+                    func(node->key, node->value);
+                }
                 node = node->hashNext.load(std::memory_order_acquire);
             }
         }
