@@ -2,12 +2,12 @@
 #include <array>
 #include <cstddef>
 #include <cassert>
-#include <casket/types/object_pool.hpp>
+#include <casket/types/fixed_object_pool.hpp>
 
 namespace casket
 {
 
-template <typename Key, typename Value, size_t HASH_TABLE_SIZE = 16384, typename AllocPolicy = StrictHeapPolicy>
+template <typename Key, typename Value, size_t HASH_TABLE_SIZE = 16384, template <typename> class PoolType = FixedObjectPool>
 class PooledHashTable final
 {
 private:
@@ -28,7 +28,7 @@ private:
         HashNode() = default;
     };
 
-    using PoolType = ObjectPool<HashNode, AllocPolicy>;
+    using NodePool = PoolType<HashNode>;
 
 public:
     template <typename... Args>
@@ -174,7 +174,7 @@ private:
     }
 
 private:
-    PoolType pool_;
+    NodePool pool_;
     std::array<HashNode*, HASH_TABLE_SIZE> hashTable_;
     size_t size_;
 };

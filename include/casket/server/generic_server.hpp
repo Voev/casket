@@ -14,7 +14,7 @@
 #include <casket/pack/pack.hpp>
 
 #include <casket/multiplexing/epoll_poller.hpp>
-#include <casket/types/object_pool.hpp>
+#include <casket/types/fixed_object_pool.hpp>
 #include <casket/types/hash_table.hpp>
 
 namespace casket
@@ -427,7 +427,7 @@ public:
         }
 
         fdToContext_.clear();
-        contextPool_.clear();
+        contextPool_.reset();
 
         activeHead_ = nullptr;
         activeTail_ = nullptr;
@@ -755,7 +755,7 @@ private:
     std::unique_ptr<EpollPoller> poller_;
     std::vector<PollEvent> events_;
 
-    ObjectPool<ClientContext, StrictHeapPolicy> contextPool_;
+    FixedObjectPool<ClientContext> contextPool_;
     HashTable<SocketType, ClientContext> fdToContext_;
 
     ClientContext* activeHead_;

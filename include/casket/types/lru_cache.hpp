@@ -2,7 +2,7 @@
 #include <array>
 #include <cstddef>
 #include <cassert>
-#include <casket/types/object_pool.hpp>
+#include <casket/types/fixed_object_pool.hpp>
 
 namespace casket
 {
@@ -12,8 +12,9 @@ namespace casket
 /// @tparam Key Type of cache key.
 /// @tparam Value Type of cached value.
 /// @tparam HASH_TABLE_SIZE Hash table buckets count.
+/// @tparam PoolType Pool type for node.
 ///
-template <typename Key, typename Value, size_t HASH_TABLE_SIZE = 16384>
+template <typename Key, typename Value, size_t HASH_TABLE_SIZE = 16384, template <typename> class PoolType = FixedObjectPool>
 class LruCache final
 {
 private:
@@ -38,7 +39,7 @@ private:
         Node() = default;
     };
 
-    using PoolType = ObjectPool<Node, StrictHeapPolicy>;
+    using NodePool = PoolType<Node>;
 
 public:
     template <typename... Args>
@@ -269,7 +270,7 @@ private:
     }
 
 private:
-    PoolType pool_;
+    NodePool pool_;
     std::array<Node*, HASH_TABLE_SIZE> hashTable_;
     Node* lruHead_;
     Node* lruTail_;

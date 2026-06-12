@@ -21,7 +21,7 @@ struct TestItem
 
 TEST(PooledQueueTest, PushPop)
 {
-    StrictPooledQueue<int> queue(10);
+    PooledQueue<int> queue(10);
     
     queue.push(42);
     queue.push(100);
@@ -36,7 +36,7 @@ TEST(PooledQueueTest, PushPop)
 
 TEST(PooledQueueTest, PushMove)
 {
-    StrictPooledQueue<std::string> queue(10);
+    PooledQueue<std::string> queue(10);
     
     std::string str = "hello";
     queue.push(std::move(str));
@@ -48,7 +48,7 @@ TEST(PooledQueueTest, PushMove)
 
 TEST(PooledQueueTest, Emplace)
 {
-    StrictPooledQueue<TestItem> queue(10);
+    PooledQueue<TestItem> queue(10);
     
     queue.emplace(42);
     queue.emplace(100, 'X');
@@ -65,7 +65,7 @@ TEST(PooledQueueTest, Emplace)
 
 TEST(PooledQueueTest, Front)
 {
-    StrictPooledQueue<int> queue(10);
+    PooledQueue<int> queue(10);
     
     queue.push(10);
     queue.push(20);
@@ -77,7 +77,7 @@ TEST(PooledQueueTest, Front)
 
 TEST(PooledQueueTest, FrontConst)
 {
-    StrictPooledQueue<int> mutableQueue(10);
+    PooledQueue<int> mutableQueue(10);
     mutableQueue.push(10);
     const auto& constQueue = mutableQueue;
     EXPECT_EQ(constQueue.front(), 10);
@@ -85,7 +85,7 @@ TEST(PooledQueueTest, FrontConst)
 
 TEST(PooledQueueTest, Empty)
 {
-    StrictPooledQueue<int> queue(10);
+    PooledQueue<int> queue(10);
     
     EXPECT_TRUE(queue.empty());
     
@@ -98,7 +98,7 @@ TEST(PooledQueueTest, Empty)
 
 TEST(PooledQueueTest, Size)
 {
-    StrictPooledQueue<int> queue(10);
+    PooledQueue<int> queue(10);
     
     EXPECT_EQ(queue.size(), 0);
     
@@ -118,7 +118,7 @@ TEST(PooledQueueTest, Size)
 
 TEST(PooledQueueTest, Clear)
 {
-    StrictPooledQueue<int> queue(10);
+    PooledQueue<int> queue(10);
     
     queue.push(1);
     queue.push(2);
@@ -134,7 +134,7 @@ TEST(PooledQueueTest, Clear)
 
 TEST(PooledQueueTest, PoolSizeSmall)
 {
-    StrictPooledQueue<int> queue(2);
+    PooledQueue<int> queue(2);
     
     queue.push(1);
     queue.push(2);
@@ -151,32 +151,9 @@ TEST(PooledQueueTest, PoolSizeSmall)
     EXPECT_TRUE(queue.empty());
 }
 
-TEST(PooledQueueTest, ExpandablePoolPolicy)
-{
-    ExpandPooledQueue<int> queue(2);
-    
-    queue.push(1);
-    queue.push(2);
-    queue.push(3);
-    queue.push(4);
-    
-    EXPECT_EQ(queue.size(), 4);
-    
-    EXPECT_EQ(queue.front(), 1);
-    queue.pop();
-    EXPECT_EQ(queue.front(), 2);
-    queue.pop();
-    EXPECT_EQ(queue.front(), 3);
-    queue.pop();
-    EXPECT_EQ(queue.front(), 4);
-    queue.pop();
-    
-    EXPECT_TRUE(queue.empty());
-}
-
 TEST(PooledQueueTest, ComplexTypeCopy)
 {
-    StrictPooledQueue<TestItem> queue(10);
+    PooledQueue<TestItem> queue(10);
     
     TestItem item1(42, 'A');
     TestItem item2(100, 'B');
@@ -195,7 +172,7 @@ TEST(PooledQueueTest, ComplexTypeCopy)
 
 TEST(PooledQueueTest, ComplexTypeMove)
 {
-    StrictPooledQueue<TestItem> queue(10);
+    PooledQueue<TestItem> queue(10);
     
     queue.emplace(42, 'A');
     queue.emplace(100, 'B');
@@ -211,7 +188,7 @@ TEST(PooledQueueTest, ComplexTypeMove)
 
 TEST(PooledQueueTest, PointerType)
 {
-    StrictPooledQueue<int*> queue(10);
+    PooledQueue<int*> queue(10);
     
     int a = 10, b = 20;
     queue.push(&a);
@@ -229,7 +206,7 @@ TEST(PooledQueueTest, PointerType)
 TEST(PooledQueueTest, ReferenceWrapper)
 {
     int dummy = 0;
-    StrictPooledQueue<std::reference_wrapper<int>> queue(10, std::ref(dummy));
+    PooledQueue<std::reference_wrapper<int>> queue(10, std::ref(dummy));
     
     int a = 10, b = 20;
     queue.push(std::ref(a));
@@ -244,29 +221,9 @@ TEST(PooledQueueTest, ReferenceWrapper)
     queue.pop();
 }
 
-TEST(PooledQueueTest, StressTest)
-{
-    ExpandPooledQueue<int> queue(100);
-    
-    for (int i = 0; i < 1000; ++i)
-    {
-        queue.push(i);
-    }
-    
-    EXPECT_EQ(queue.size(), 1000);
-    
-    for (int i = 0; i < 1000; ++i)
-    {
-        EXPECT_EQ(queue.front(), i);
-        queue.pop();
-    }
-    
-    EXPECT_TRUE(queue.empty());
-}
-
 TEST(PooledQueueTest, InterleavedPushPop)
 {
-    StrictPooledQueue<int> queue(10);
+    PooledQueue<int> queue(10);
     
     queue.push(1);
     queue.push(2);
@@ -298,7 +255,7 @@ TEST(PooledQueueTest, LargeObjects)
         explicit LargeObject(int i) : id(i) {}
     };
     
-    StrictPooledQueue<LargeObject> queue(100);
+    PooledQueue<LargeObject> queue(100);
     
     for (int i = 0; i < 100; ++i)
     {
@@ -325,9 +282,14 @@ TEST(PooledQueueTest, NonDefaultConstructible)
         
         NonDefaultConstructible(const NonDefaultConstructible&) = default;
         NonDefaultConstructible(NonDefaultConstructible&&) = default;
+
+        void reset() noexcept
+        {
+            value = 0;
+        }
     };
     
-    StrictPooledQueue<NonDefaultConstructible> queue(10, 0);
+    PooledQueue<NonDefaultConstructible> queue(10, 0);
     
     queue.emplace(42);
     queue.emplace(100);
@@ -342,7 +304,7 @@ TEST(PooledQueueTest, NonDefaultConstructible)
 
 TEST(PooledQueueTest, PoolStats)
 {
-    StrictPooledQueue<int> queue(10, 1);
+    PooledQueue<int> queue(10, 1);
     
     auto stats = queue.poolStats();
     EXPECT_EQ(stats.first, 10);

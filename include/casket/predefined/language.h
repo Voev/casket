@@ -130,4 +130,20 @@
     #define LANGUAGE_IS_UNKNOWN 0
 #endif
 
+#if LANGUAGE_IS_CXX17 || LANGUAGE_IS_CXX20 || LANGUAGE_IS_CXX23
+    #define IF_CPP17_OR_LATER(...) __VA_ARGS__
+    #define ELSE_CPP17_OR_LATER(...)
+#else
+    #define IF_CPP17_OR_LATER(...)
+    #define ELSE_CPP17_OR_LATER(...) __VA_ARGS__
+#endif
+
+#if LANGUAGE_IS_CXX20 || LANGUAGE_IS_CXX23
+    #define IF_CPP20_OR_LATER(...) __VA_ARGS__
+    #define ELSE_CPP20_OR_LATER(...)
+#else
+    #define IF_CPP20_OR_LATER(...)
+    #define ELSE_CPP20_OR_LATER(...) __VA_ARGS__
+#endif
+
 // clang-format on
