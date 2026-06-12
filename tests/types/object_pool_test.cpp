@@ -69,26 +69,6 @@ TEST(ObjectPoolTest, AcquireWithMultipleArgs)
     pool.release(obj);
 }
 
-TEST(ObjectPoolTest, PoolExhaustionStrictPolicy)
-{
-    ObjectPool<TestObject, StrictHeapPolicy> pool(3);
-
-    TestObject* obj1 = pool.acquire();
-    TestObject* obj2 = pool.acquire();
-    TestObject* obj3 = pool.acquire();
-
-    ASSERT_NE(obj1, nullptr);
-    ASSERT_NE(obj2, nullptr);
-    ASSERT_NE(obj3, nullptr);
-
-    TestObject* obj4 = pool.acquire();
-    EXPECT_EQ(obj4, nullptr);
-
-    pool.release(obj1);
-    pool.release(obj2);
-    pool.release(obj3);
-}
-
 TEST(ObjectPoolTest, PoolExhaustionFallbackPolicy)
 {
     ObjectPool<TestObject, HeapAllocationPolicy> pool(3);

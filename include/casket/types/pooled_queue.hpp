@@ -2,17 +2,17 @@
 
 #include <cstddef>
 #include <utility>
-#include <casket/types/object_pool.hpp>
+#include <casket/types/fixed_object_pool.hpp>
 
 namespace casket
 {
 
 /// @brief Single-threaded queue with optional node pooling.
 /// @tparam T Type of stored elements.
-/// @tparam AllocPolicy Allocation policy for node pool.
+/// @tparam PoolType Pool type for node.
 /// @note NOT thread-safe. All operations must be called from a single thread.
-template <typename T, typename AllocPolicy = HeapAllocationPolicy>
-class BasicPooledQueue
+template <typename T, template <typename> class PoolType = FixedObjectPool>
+class PooledQueue
 {
 private:
     struct Node
@@ -28,20 +28,20 @@ private:
         }
     };
 
-    using PoolType = ObjectPool<Node, AllocPolicy>;
+    using NodePool = PoolType<Node>;
 
 public:
     /// @brief Constructs an empty queue.
     /// @param poolSize Size of internal node pool.
     /// @param args Arguments to initialize all nodes in the pool (including stub)
     template <typename... Args>
-    explicit BasicPooledQueue(size_t poolSize, Args&&... args)
+    explicit PooledQueue(size_t poolSize, Args&&... args)
         : pool_(poolSize, std::forward<Args>(args)...)
     {
     }
 
     /// @brief Destructor. Clears all elements and releases resources.
-    ~BasicPooledQueue() noexcept
+    ~PooledQueue() noexcept
     {
         clear();
     }
@@ -197,24 +197,9 @@ public:
     }
 
 private:
-    PoolType pool_;
+    NodePool pool_;
     Node* head_{nullptr}; ///< Points to the last node (producer side)
     Node* tail_{nullptr}; ///< Points to the dummy node before first element
 };
-
-/// @brief Convenience alias for default heap-fallback policy
-template <typename T>
-using ExpandPooledQueue = BasicPooledQueue<T, HeapAllocationPolicy>;
-
-/// @brief Convenience alias for no-heap policy
-template <typename T>
-using StrictPooledQueue = BasicPooledQueue<T, StrictHeapPolicy>;
-
-/// @brief Swaps two queues.
-template <typename T, typename AllocPolicy>
-void swap(BasicPooledQueue<T, AllocPolicy>& lhs, BasicPooledQueue<T, AllocPolicy>& rhs) noexcept
-{
-    lhs.swap(rhs);
-}
 
 } // namespace casket
