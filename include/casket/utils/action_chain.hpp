@@ -6,41 +6,39 @@
 #include <utility>
 #include <type_traits>
 
+#include <iostream>
+
 namespace casket
 {
 
-/**
- * @brief Цепочка действий с автоматическим откатом при ошибке
- *
- * Позволяет объединить несколько операций в транзакцию с гарантией,
- * что при возникновении исключения все предыдущие операции будут откачены
- * в обратном порядке.
- *
- * @example
- * ActionChain chain;
- * Object* obj = nullptr;
- *
- * chain.addAction(
- *     [&]() { obj = new Object(); },
- *     [&]() { delete obj; }
- * );
- *
- * chain.addAction(
- *     [&]() { writeToFile(obj); },
- *     [&]() { removeFile("data.dat"); }
- * );
- *
- * chain.execute();
- */
+/// @brief Chain of actions with automatic rollback on error.
+///
+/// Allows combining multiple operations into a transaction with a guarantee
+/// that if an exception occurs, all previous operations will be rolled back
+/// in reverse order.
+///
+/// @example
+/// ActionChain chain;
+/// Object* obj = nullptr;
+///
+/// chain.addAction(
+///     [&]() { obj = new Object(); },
+///     [&]() { delete obj; }
+/// );
+///
+/// chain.addAction(
+///     [&]() { writeToFile(obj); },
+///     [&]() { removeFile("data.dat"); }
+/// );
+///
+/// chain.execute();
 class ActionChain
 {
 public:
     using Action = std::function<void()>;
     using Rollback = std::function<void()>;
 
-    /**
-     * @brief Структура для хранения пары "действие - откат"
-     */
+    /// @brief Structure for storing a pair of "action - rollback".
     struct ActionPair
     {
         Action forward;
@@ -71,7 +69,7 @@ public:
             return *this;
         }
 
-        // Запрещаем копирование
+        // Copying is prohibited
         ActionPair(const ActionPair&) = delete;
         ActionPair& operator=(const ActionPair&) = delete;
     };
@@ -80,20 +78,20 @@ public:
 
     ~ActionChain()
     {
-        if (!m_committed)
+        if (!committed_)
             rollbackAll();
     }
 
-    // Запрещаем копирование
+    // Copying is prohibited
     ActionChain(const ActionChain&) = delete;
     ActionChain& operator=(const ActionChain&) = delete;
 
-    // Разрешаем перемещение
+    // Moving is allowed
     ActionChain(ActionChain&& other) noexcept
-        : m_actions(std::move(other.m_actions))
-        , m_committed(other.m_committed)
+        : actions_(std::move(other.actions_))
+        , committed_(other.committed_)
     {
-        other.m_committed = false;
+        other.committed_ = false;
     }
 
     ActionChain& operator=(ActionChain&& other) noexcept
@@ -101,176 +99,162 @@ public:
         if (this != &other)
         {
             rollbackAll();
-            m_actions = std::move(other.m_actions);
-            m_committed = other.m_committed;
-            other.m_committed = false;
+            actions_ = std::move(other.actions_);
+            committed_ = other.committed_;
+            other.committed_ = false;
         }
         return *this;
     }
 
-    /**
-     * @brief Добавить действие с функцией отката
-     *
-     * @tparam Fwd Тип функции прямого действия
-     * @tparam Rlb Тип функции отката
-     * @param forward Функция, выполняющая основное действие
-     * @param rollback Функция, откатывающая действие при ошибке
-     * @return ActionChain& Ссылка на текущий объект для цепочек
-     */
+    /// @brief Add an action with a rollback function.
+    ///
+    /// @tparam Fwd Type of the forward action function.
+    /// @tparam Rlb Type of the rollback function.
+    /// @param forward Function that performs the main action.
+    /// @param rollback Function that rolls back the action on error.
+    ///
+    /// @return ActionChain& Reference to the current object for chaining.
     template <typename Fwd, typename Rlb>
     ActionChain& addAction(Fwd&& forward, Rlb&& rollback)
     {
         static_assert(std::is_invocable_v<Fwd>, "forward must be callable with no arguments");
         static_assert(std::is_invocable_v<Rlb>, "rollback must be callable with no arguments");
 
-        m_actions.emplace_back(std::forward<Fwd>(forward), std::forward<Rlb>(rollback));
+        actions_.emplace_back(std::forward<Fwd>(forward), std::forward<Rlb>(rollback));
         return *this;
     }
 
-    /**
-     * @brief Добавить действие только с прямым ходом (без отката)
-     *
-     * @tparam Fwd Тип функции прямого действия
-     * @param forward Функция, выполняющая основное действие
-     * @return ActionChain& Ссылка на текущий объект для цепочек
-     */
+    /// @brief Add an action with forward only (no rollback)
+    ///
+    /// @tparam Fwd Type of the forward action function
+    ///
+    /// @param forward Function that performs the main action.
+    ///
+    /// @return ActionChain& Reference to the current object for chaining.
     template <typename Fwd>
     ActionChain& addAction(Fwd&& forward)
     {
         static_assert(std::is_invocable_v<Fwd>, "forward must be callable with no arguments");
 
-        m_actions.emplace_back(std::forward<Fwd>(forward), []() {} // Пустой откат
+        actions_.emplace_back(std::forward<Fwd>(forward),
+                              []()
+                              {
+                              } // Empty rollback
         );
         return *this;
     }
 
-    /**
-     * @brief Выполнить все добавленные действия
-     *
-     * Действия выполняются последовательно. Если какое-то действие
-     * выбрасывает исключение, все ранее выполненные действия
-     * откатываются в обратном порядке.
-     *
-     * @throw std::exception Любое исключение из действий или откатов
-     */
+    /// @brief Execute all added actions.
+    ///
+    /// Actions are executed sequentially. If any action throws an exception,
+    /// all previously executed actions are rolled back in reverse order.
+    ///
+    /// @throw std::exception Any exception from actions or rollbacks.
     void execute()
     {
-        if (m_committed)
+        if (committed_)
         {
-            return; // Уже выполнено
+            return; // Already executed
         }
 
-        m_committed = true; // Временная фиксация, будет отменена при ошибке
+        committed_ = true; // Temporary commit, will be undone on error
 
         try
         {
-            for (size_t i = 0; i < m_actions.size(); ++i)
+            for (size_t i = 0; i < actions_.size(); ++i)
             {
                 try
                 {
-                    m_actions[i].forward();
-                    m_actions[i].executed = true;
+                    actions_[i].forward();
+                    actions_[i].executed = true;
                 }
                 catch (...)
                 {
-                    // Откатываем все ранее выполненные действия
+                    // Roll back all previously executed actions
                     rollbackExecuted(i);
-                    m_committed = false;
-                    throw; // Перебрасываем исходное исключение
+                    committed_ = false;
+                    throw; // Rethrow the original exception
                 }
             }
         }
         catch (...)
         {
-            m_committed = false;
+            committed_ = false;
             throw;
         }
     }
 
-    /**
-     * @brief Принудительно зафиксировать цепочку (отключить автоматический откат)
-     *
-     * Используйте после успешного выполнения, чтобы предотвратить
-     * откат в деструкторе.
-     */
-    void commit()
+    /// @brief Force commit the chain (disable automatic rollback).
+    ///
+    /// Use after successful execution to prevent rollback in the destructor.
+    void commit() noexcept
     {
-        m_committed = true;
+        committed_ = true;
     }
 
-    /**
-     * @brief Откатить все выполненные действия
-     *
-     * Можно вызвать вручную для явного отката
-     */
-    void rollback()
+    /// @brief Roll back all executed actions
+    ///
+    /// Can be called manually for explicit rollback.
+    void rollback() noexcept
     {
         rollbackAll();
-        m_committed = false;
+        committed_ = false;
     }
 
-    /**
-     * @brief Проверить, зафиксирована ли цепочка
-     */
-    bool isCommitted() const
+    /// @brief Check if the chain is committed.
+    bool isCommitted() const noexcept
     {
-        return m_committed;
+        return committed_;
     }
 
-    /**
-     * @brief Получить количество действий в цепочке
-     */
-    size_t size() const
+    /// @brief Get the number of actions in the chain.
+    size_t size() const noexcept
     {
-        return m_actions.size();
+        return actions_.size();
     }
 
-    /**
-     * @brief Очистить все действия
-     */
-    void clear()
+    /// @brief Clear all actions.
+    void clear() noexcept
     {
         rollbackAll();
-        m_actions.clear();
-        m_committed = false;
+        actions_.clear();
+        committed_ = false;
     }
 
 private:
-    std::vector<ActionPair> m_actions;
-    bool m_committed = false;
+    std::vector<ActionPair> actions_;
+    bool committed_ = false;
 
-    /**
-     * @brief Откатить все выполненные действия в обратном порядке
-     */
+    /// @brief Roll back all executed actions in reverse order.
     void rollbackAll() noexcept
     {
-        if (!m_actions.empty())
+        if (!actions_.empty())
         {
-            rollbackExecuted(m_actions.size());
+            rollbackExecuted(actions_.size());
         }
     }
 
-    /**
-     * @brief Откатить выполненные действия до указанного индекса
-     * @param untilIndex Индекс, до которого нужно откатить (не включая)
-     */
+    /// @brief Roll back executed actions up to the specified index.
+    ///
+    /// @param untilIndex Index up to which to roll back (exclusive).
+    ///
     void rollbackExecuted(size_t untilIndex) noexcept
     {
-        // Идем в обратном порядке
+        // Go in reverse order
         for (size_t i = untilIndex; i > 0; --i)
         {
             size_t idx = i - 1;
-            if (m_actions[idx].executed)
+            if (actions_[idx].executed)
             {
                 try
                 {
-                    m_actions[idx].rollback();
-                    m_actions[idx].executed = false;
+                    actions_[idx].rollback();
+                    actions_[idx].executed = false;
                 }
                 catch (...)
                 {
-                    // Логируем ошибку отката, но продолжаем
-                    // Можно использовать свой логгер, если есть
+                    // Log rollback error but continue
+                    // Can use your own logger if available
                 }
             }
         }
