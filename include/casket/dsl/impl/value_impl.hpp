@@ -1,10 +1,74 @@
 #pragma once
 
+#include <casket/dsl/impl/value_impl.hpp>
 #include <sstream>
-#include <casket/dsl/value.hpp>
 
 namespace casket::dsl
 {
+
+// ============================================================================
+// Object методы (реализация)
+// ============================================================================
+template <typename T>
+inline std::optional<T> Object::get(const std::string& key) const noexcept
+{
+    auto it = fields.find(key);
+    if (it == fields.end())
+        return std::nullopt;
+    return it->second.as<T>();
+}
+
+inline bool Object::isNull(const std::string& key) const noexcept
+{
+    auto it = fields.find(key);
+    if (it == fields.end())
+        return false;
+    return it->second.isNull();
+}
+
+template <typename T>
+inline T Object::getOr(const std::string& key, const T& defaultValue) const noexcept
+{
+    auto val = get<T>(key);
+    return val.has_value() ? *val : defaultValue;
+}
+
+template <typename T>
+inline T Object::getOr(const std::string& key, T&& defaultValue) const noexcept
+{
+    auto val = get<T>(key);
+    return val.has_value() ? std::move(*val) : std::forward<T>(defaultValue);
+}
+
+inline bool Object::has(const std::string& key) const noexcept
+{
+    return fields.find(key) != fields.end();
+}
+
+inline size_t Object::erase(const std::string& key) noexcept
+{
+    return fields.erase(key);
+}
+
+inline size_t Object::size() const noexcept
+{
+    return fields.size();
+}
+
+inline bool Object::empty() const noexcept
+{
+    return fields.empty();
+}
+
+inline bool Object::operator==(const Object& other) const
+{
+    return fields == other.fields;
+}
+
+inline bool Object::operator!=(const Object& other) const
+{
+    return !(*this == other);
+}
 
 template <>
 inline std::optional<std::string> Value::as<std::string>() const noexcept
@@ -72,6 +136,9 @@ inline std::optional<Object> Value::as<Object>() const noexcept
     return std::nullopt;
 }
 
+// ============================================================================
+// Value::toString
+// ============================================================================
 inline std::string Value::toString() const
 {
     return std::visit(
