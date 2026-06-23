@@ -1,9 +1,9 @@
 #include <gtest/gtest.h>
-#include <casket/dsl/dsl.hpp>
+#include <casket/json/json.hpp>
 
-using namespace casket::dsl;
+using namespace casket::json;
 
-class DslObjectTest : public ::testing::Test
+class JsonObjectTest : public ::testing::Test
 {
 protected:
     void SetUp() override
@@ -15,11 +15,11 @@ protected:
     }
 };
 
-TEST_F(DslObjectTest, ObjectGetExistingKey)
+TEST_F(JsonObjectTest, ObjectGetExistingKey)
 {
     auto obj = std::make_unique<Object>();
-    obj->fields.at("name") = Value(std::string("Alex"));
-    obj->fields.at("age") = Value(Integer(30));
+    obj->fields["name"] = Value(std::string("Alex"));
+    obj->fields["age"] = Value(Integer(30));
 
     auto name = obj->get<std::string>("name");
     EXPECT_TRUE(name.has_value());
@@ -30,26 +30,26 @@ TEST_F(DslObjectTest, ObjectGetExistingKey)
     EXPECT_EQ(*age, 30);
 }
 
-TEST_F(DslObjectTest, ObjectGetMissingKey)
+TEST_F(JsonObjectTest, ObjectGetMissingKey)
 {
     auto obj = std::make_unique<Object>();
     auto value = obj->get<std::string>("missing");
     EXPECT_FALSE(value.has_value());
 }
 
-TEST_F(DslObjectTest, ObjectGetTypeMismatch)
+TEST_F(JsonObjectTest, ObjectGetTypeMismatch)
 {
     auto obj = std::make_unique<Object>();
-    obj->fields.at("value") = Value(std::string("text"));
+    obj->fields["value"] = Value(std::string("text"));
 
     auto intVal = obj->get<Integer>("value");
     EXPECT_FALSE(intVal.has_value());
 }
 
-TEST_F(DslObjectTest, ObjectGetOr)
+TEST_F(JsonObjectTest, ObjectGetOr)
 {
     auto obj = std::make_unique<Object>();
-    obj->fields.at("name") = Value(std::string("Alex"));
+    obj->fields["name"] = Value(std::string("Alex"));
 
     EXPECT_EQ(obj->getOr<std::string>("name", "default"), "Alex");
     EXPECT_EQ(obj->getOr<std::string>("missing", "default"), "default");

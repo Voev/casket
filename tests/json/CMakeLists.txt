@@ -1,5 +1,5 @@
 # Application name
-set(TEST_NAME casket_dsl_test)
+set(TEST_NAME casket_json_test)
 
 # Sources
 file(GLOB_RECURSE SOURCES *.cpp)

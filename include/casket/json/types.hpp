@@ -3,7 +3,7 @@
 #include <cstdint>
 #include <string>
 
-namespace casket::dsl
+namespace casket::json
 {
 
 using Integer = int64_t;
@@ -22,4 +22,4 @@ struct Null
     }
 };
 
-} // namespace casket::dsl
+} // namespace casket::json

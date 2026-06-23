@@ -1,9 +1,9 @@
 #pragma once
 
-#include <casket/dsl/impl/value_impl.hpp>
+#include <casket/json/impl/value_impl.hpp>
 #include <sstream>
 
-namespace casket::dsl
+namespace casket::json
 {
 
 // ============================================================================
@@ -199,4 +199,4 @@ inline std::string Value::typeName() const
         data_);
 }
 
-} // namespace casket::dsl
+} // namespace casket::json

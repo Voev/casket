@@ -2,9 +2,9 @@
 
 #include <sstream>
 #include <set>
-#include <casket/dsl/schema.hpp>
+#include <casket/json/schema.hpp>
 
-namespace casket::dsl
+namespace casket::json
 {
 
 inline const Value* Schema::getValueByPath(const Object* root, const std::string& path) const noexcept
@@ -153,4 +153,4 @@ inline std::string Schema::generateHelp() const
     return ss.str();
 }
 
-} // namespace casket::dsl
+} // namespace casket::json

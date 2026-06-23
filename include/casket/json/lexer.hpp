@@ -6,20 +6,18 @@
 #include <cctype>
 #include <stdexcept>
 
-namespace casket::dsl
+namespace casket::json
 {
 
-// ============================================================================
-// Token
-// ============================================================================
 enum class TokenType
 {
     Text,
-    LBrace,
-    RBrace,
-    LBracket,
-    RBracket,
-    Eq,
+    LBrace,   // {
+    RBrace,   // }
+    LBracket, // [
+    RBracket, // ]
+    Colon,    // :
+    Comma,    // ,
     Eof
 };
 
@@ -44,9 +42,6 @@ struct Token
     Token& operator=(Token&&) noexcept = default;
 };
 
-// ============================================================================
-// Lexer
-// ============================================================================
 class Lexer
 {
     std::string_view input_;
@@ -131,7 +126,8 @@ class Lexer
     {
         size_t start = pos_;
         while (pos_ < input_.size() && !std::isspace(static_cast<unsigned char>(input_[pos_])) && input_[pos_] != '{' &&
-               input_[pos_] != '}' && input_[pos_] != '[' && input_[pos_] != ']' && input_[pos_] != '=')
+               input_[pos_] != '}' && input_[pos_] != '[' && input_[pos_] != ']' && input_[pos_] != ':' &&
+               input_[pos_] != ',')
         {
             pos_++;
             column_++;
@@ -179,8 +175,12 @@ public:
                 tokens.emplace_back(TokenType::RBracket, "]", tokLine, tokCol);
                 get();
                 break;
-            case '=':
-                tokens.emplace_back(TokenType::Eq, "=", tokLine, tokCol);
+            case ':':
+                tokens.emplace_back(TokenType::Colon, ":", tokLine, tokCol);
+                get();
+                break;
+            case ',':
+                tokens.emplace_back(TokenType::Comma, ",", tokLine, tokCol);
                 get();
                 break;
             case '"':
@@ -203,4 +203,4 @@ public:
     }
 };
 
-} // namespace casket::dsl
+} // namespace casket::json

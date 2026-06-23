@@ -6,9 +6,9 @@
 #include <optional>
 #include <string>
 #include <utility>
-#include <casket/dsl/types.hpp>
+#include <casket/json/types.hpp>
 
-namespace casket::dsl {
+namespace casket::json {
 
 // ============================================================================
 // Forward declarations
@@ -180,4 +180,4 @@ template <> std::optional<Null> Value::as<Null>() const noexcept;
 template <> std::optional<Array> Value::as<Array>() const noexcept;
 template <> std::optional<Object> Value::as<Object>() const noexcept;
 
-} // namespace casket::dsl
+} // namespace casket::json

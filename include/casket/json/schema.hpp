@@ -8,9 +8,9 @@
 #include <sstream>
 #include <iomanip>
 
-#include <casket/dsl/value.hpp>
+#include <casket/json/value.hpp>
 
-namespace casket::dsl
+namespace casket::json
 {
 
 // ============================================================================
@@ -227,4 +227,4 @@ public:
     std::string generateHelp() const;
 };
 
-} // namespace casket::dsl
+} // namespace casket::json
