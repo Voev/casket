@@ -1,11 +1,11 @@
 #pragma once
 
-#include "value.hpp"
-#include "lexer.hpp"
 #include <vector>
-#include <optional>
 #include <charconv>
 #include <system_error>
+#include <casket/nonstd/optional.hpp>
+#include <casket/json/value.hpp>
+#include <casket/json/lexer.hpp>
 
 namespace casket::json
 {
@@ -39,7 +39,7 @@ class Parser
         return tok;
     }
 
-    std::optional<Value> parseNumber(std::string_view str) const noexcept
+    nonstd::optional<Value> parseNumber(std::string_view str) const noexcept
     {
         Integer intVal;
         auto [ptr1, ec1] = std::from_chars(str.data(), str.data() + str.size(), intVal);

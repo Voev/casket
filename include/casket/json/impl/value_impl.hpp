@@ -6,11 +6,8 @@
 namespace casket::json
 {
 
-// ============================================================================
-// Object методы (реализация)
-// ============================================================================
 template <typename T>
-inline std::optional<T> Object::get(const std::string& key) const noexcept
+inline nonstd::optional<T> Object::get(const std::string& key) const noexcept
 {
     auto it = fields.find(key);
     if (it == fields.end())
@@ -71,7 +68,7 @@ inline bool Object::operator!=(const Object& other) const
 }
 
 template <>
-inline std::optional<std::string> Value::as<std::string>() const noexcept
+inline nonstd::optional<std::string> Value::as<std::string>() const noexcept
 {
     if (const auto* v = std::get_if<std::string>(&data_))
         return *v;
@@ -79,7 +76,7 @@ inline std::optional<std::string> Value::as<std::string>() const noexcept
 }
 
 template <>
-inline std::optional<Integer> Value::as<Integer>() const noexcept
+inline nonstd::optional<Integer> Value::as<Integer>() const noexcept
 {
     if (const auto* v = std::get_if<Integer>(&data_))
         return *v;
@@ -87,7 +84,7 @@ inline std::optional<Integer> Value::as<Integer>() const noexcept
 }
 
 template <>
-inline std::optional<int> Value::as<int>() const noexcept
+inline nonstd::optional<int> Value::as<int>() const noexcept
 {
     if (const auto* v = std::get_if<Integer>(&data_))
         return static_cast<int>(*v);
@@ -95,7 +92,7 @@ inline std::optional<int> Value::as<int>() const noexcept
 }
 
 template <>
-inline std::optional<Float> Value::as<Float>() const noexcept
+inline nonstd::optional<Float> Value::as<Float>() const noexcept
 {
     if (const auto* v = std::get_if<Float>(&data_))
         return *v;
@@ -105,7 +102,7 @@ inline std::optional<Float> Value::as<Float>() const noexcept
 }
 
 template <>
-inline std::optional<Boolean> Value::as<Boolean>() const noexcept
+inline nonstd::optional<Boolean> Value::as<Boolean>() const noexcept
 {
     if (const auto* v = std::get_if<Boolean>(&data_))
         return *v;
@@ -113,7 +110,7 @@ inline std::optional<Boolean> Value::as<Boolean>() const noexcept
 }
 
 template <>
-inline std::optional<Null> Value::as<Null>() const noexcept
+inline nonstd::optional<Null> Value::as<Null>() const noexcept
 {
     if (std::holds_alternative<Null>(data_))
         return Null{};
@@ -121,7 +118,7 @@ inline std::optional<Null> Value::as<Null>() const noexcept
 }
 
 template <>
-inline std::optional<Array> Value::as<Array>() const noexcept
+inline nonstd::optional<Array> Value::as<Array>() const noexcept
 {
     if (const auto* v = std::get_if<Array>(&data_))
         return *v;
@@ -129,19 +126,16 @@ inline std::optional<Array> Value::as<Array>() const noexcept
 }
 
 template <>
-inline std::optional<Object> Value::as<Object>() const noexcept
+inline nonstd::optional<Object> Value::as<Object>() const noexcept
 {
     if (const auto* v = std::get_if<Object>(&data_))
         return *v;
     return std::nullopt;
 }
 
-// ============================================================================
-// Value::toString
-// ============================================================================
 inline std::string Value::toString() const
 {
-    return std::visit(
+    return nonstd::visit(
         [](auto&& arg) -> std::string
         {
             using T = std::decay_t<decltype(arg)>;

@@ -13,21 +13,18 @@
 namespace casket::json
 {
 
-// ============================================================================
-// TypedParamSpec
-// ============================================================================
 template <typename T>
 struct TypedParamSpec
 {
     std::string path;
     std::string description;
     bool requiredValue = false;
-    std::optional<T> defaultValue;
+    nonstd::optional<T> defaultValue;
     std::function<bool(const T&)> validator;
 
     TypedParamSpec() = default;
 
-    TypedParamSpec(std::string p, std::string desc, bool req = false, std::optional<T> def = std::nullopt)
+    TypedParamSpec(std::string p, std::string desc, bool req = false, nonstd::optional<T> def = std::nullopt)
         : path(std::move(p))
         , description(std::move(desc))
         , requiredValue(req)
@@ -112,9 +109,6 @@ struct TypedParamSpec
     }
 };
 
-// ============================================================================
-// ISpec
-// ============================================================================
 class ISpec
 {
 public:
@@ -123,7 +117,7 @@ public:
     virtual std::string_view getDescription() const = 0;
     virtual bool isRequired() const = 0;
     virtual bool validate(const Value& v, std::string& error) const = 0;
-    virtual std::optional<Value> getDefault() const = 0;
+    virtual nonstd::optional<Value> getDefault() const = 0;
     virtual std::string getTypeName() const = 0;
 };
 
@@ -167,7 +161,7 @@ public:
         return true;
     }
 
-    std::optional<Value> getDefault() const override
+    nonstd::optional<Value> getDefault() const override
     {
         if (spec_.defaultValue.has_value())
             return Value{*spec_.defaultValue};
@@ -195,9 +189,6 @@ public:
     }
 };
 
-// ============================================================================
-// Schema
-// ============================================================================
 class Schema
 {
     std::vector<std::unique_ptr<ISpec>> specs_;

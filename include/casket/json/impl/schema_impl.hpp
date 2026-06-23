@@ -1,7 +1,6 @@
 #pragma once
 
 #include <sstream>
-#include <set>
 #include <casket/json/schema.hpp>
 
 namespace casket::json

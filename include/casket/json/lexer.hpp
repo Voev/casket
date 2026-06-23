@@ -2,9 +2,9 @@
 
 #include <string>
 #include <vector>
-#include <string_view>
 #include <cctype>
 #include <stdexcept>
+#include <casket/nonstd/string_view.hpp>
 
 namespace casket::json
 {
