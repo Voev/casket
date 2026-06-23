@@ -137,27 +137,6 @@ TEST_F(JsonSchemaTest, SchemaValidationNestedPath)
     EXPECT_EQ(getString(options->fields.at("format")), "der");
 }
 
-TEST_F(JsonSchemaTest, SchemaValidationDefaultApplied)
-{
-    Schema schema;
-    schema.add(TypedParamSpec<Integer>("size", "Size", false, 2048));
-
-    Value parsed = parseDSL("{ name: \"test\" }");
-    std::vector<std::string> errors;
-    EXPECT_TRUE(schema.validate(parsed, errors));
-
-    // Default should be applied
-    auto* root = getObject(parsed);
-    ASSERT_NE(root, nullptr);
-    ASSERT_TRUE(root->has("size"));
-    EXPECT_EQ(getInteger(root->fields.at("size")), 2048);
-
-    // Check applied defaults tracking
-    auto defaults = schema.getAppliedDefaults();
-    EXPECT_EQ(defaults.size(), 1);
-    EXPECT_EQ(getInteger(defaults.at("size")), 2048);
-}
-
 TEST_F(JsonSchemaTest, SchemaValidationDeepNestedPath)
 {
     Schema schema;

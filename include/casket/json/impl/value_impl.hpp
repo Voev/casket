@@ -1,10 +1,16 @@
 #pragma once
 
-#include <casket/json/impl/value_impl.hpp>
 #include <sstream>
+#include <casket/json/impl/value_impl.hpp>
 
 namespace casket::json
 {
+
+template <typename T>
+inline void Object::insert(std::string key, T&& value)
+{
+    fields.emplace(std::move(key), Value{std::forward<T>(value)});
+}
 
 template <typename T>
 inline nonstd::optional<T> Object::get(const std::string& key) const noexcept
@@ -12,6 +18,41 @@ inline nonstd::optional<T> Object::get(const std::string& key) const noexcept
     auto it = fields.find(key);
     if (it == fields.end())
         return std::nullopt;
+    return it->second.as<T>();
+}
+
+template <typename T>
+inline nonstd::optional<T> Object::getNested(const Path& path) const noexcept
+{
+    if (path.depth() == 0)
+    {
+        return std::nullopt;
+    }
+    
+    if (path.depth() == 1)
+    {
+        return get<T>(std::string(path[0]));
+    }
+    
+    const Object* current = this;
+    for (size_t i = 0; i < path.depth() - 1; ++i)
+    {
+        auto it = current->fields.find(std::string(path[i]));
+        if (it == current->fields.end())
+            return std::nullopt;
+        
+        if (!it->second.is<Object>())
+            return std::nullopt;
+        
+        current = it->second.get<Object>();
+        if (!current)
+            return std::nullopt;
+    }
+    
+    auto it = current->fields.find(std::string(path.back()));
+    if (it == current->fields.end())
+        return std::nullopt;
+    
     return it->second.as<T>();
 }
 
@@ -34,6 +75,20 @@ template <typename T>
 inline T Object::getOr(const std::string& key, T&& defaultValue) const noexcept
 {
     auto val = get<T>(key);
+    return val.has_value() ? std::move(*val) : std::forward<T>(defaultValue);
+}
+
+template <typename T>
+inline T Object::getNestedOr(const Path& path, const T& defaultValue) const noexcept
+{
+    auto val = getNested<T>(path);
+    return val.has_value() ? *val : defaultValue;
+}
+
+template <typename T>
+inline T Object::getNestedOr(const Path& path, T&& defaultValue) const noexcept
+{
+    auto val = getNested<T>(path);
     return val.has_value() ? std::move(*val) : std::forward<T>(defaultValue);
 }
 

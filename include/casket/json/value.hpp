@@ -8,6 +8,7 @@
 #include <casket/nonstd/variant.hpp>
 #include <casket/nonstd/optional.hpp>
 #include <casket/json/types.hpp>
+#include <casket/json/path.hpp>
 
 namespace casket::json
 {
@@ -108,13 +109,13 @@ struct Object
     Object& operator=(Object&&) noexcept = default;
 
     template <typename T>
-    void insert(std::string key, T&& value)
-    {
-        fields.emplace(std::move(key), Value{std::forward<T>(value)});
-    }
+    void insert(std::string key, T&& value);
 
     template <typename T>
     nonstd::optional<T> get(const std::string& key) const noexcept;
+
+    template <typename T>
+    nonstd::optional<T> getNested(const Path& path) const noexcept;
 
     bool isNull(const std::string& key) const noexcept;
 
@@ -123,6 +124,12 @@ struct Object
 
     template <typename T>
     T getOr(const std::string& key, T&& defaultValue) const noexcept;
+
+    template <typename T>
+    T getNestedOr(const Path& path, const T& defaultValue) const noexcept;
+
+    template <typename T>
+    T getNestedOr(const Path& path, T&& defaultValue) const noexcept;
 
     bool has(const std::string& key) const noexcept;
     size_t erase(const std::string& key) noexcept;

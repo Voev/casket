@@ -192,11 +192,10 @@ public:
 class Schema
 {
     std::vector<std::unique_ptr<ISpec>> specs_;
-    std::unordered_map<std::string, Value> appliedDefaults_;
 
     const Value* getValueByPath(const Object* root, const std::string& path) const noexcept;
 
-    void setValueByPath(Object* root, const std::string& path, Value value);
+    void setValueByPath(Object* root, const std::string& path, Value value) const;
 
 public:
     Schema() = default;
@@ -208,14 +207,14 @@ public:
         return *this;
     }
 
-    bool validate(Value& root, std::vector<std::string>& errors);
-
-    const std::unordered_map<std::string, Value>& getAppliedDefaults() const noexcept
-    {
-        return appliedDefaults_;
-    }
+    bool validate(Value& root, std::vector<std::string>& errors) const;
 
     std::string generateHelp() const;
+
+    static inline std::shared_ptr<Schema> create()
+    {
+        return std::make_shared<Schema>();
+    }
 };
 
 } // namespace casket::json
