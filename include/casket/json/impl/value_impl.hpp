@@ -219,9 +219,6 @@ inline std::string Value::toString() const
         data_);
 }
 
-// ============================================================================
-// Value::typeName
-// ============================================================================
 inline std::string Value::typeName() const
 {
     return std::visit(
