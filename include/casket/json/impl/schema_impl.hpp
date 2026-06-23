@@ -37,7 +37,7 @@ inline const Value* Schema::getValueByPath(const Object* root, const std::string
     return nullptr;
 }
 
-inline void Schema::setValueByPath(Object* root, const std::string& path, Value value)
+inline void Schema::setValueByPath(Object* root, const std::string& path, Value value) const
 {
     if (!root)
         return;
@@ -71,7 +71,7 @@ inline void Schema::setValueByPath(Object* root, const std::string& path, Value 
     }
 }
 
-inline bool Schema::validate(Value& root, std::vector<std::string>& errors)
+inline bool Schema::validate(Value& root, std::vector<std::string>& errors) const
 {
     if (!root.is<Object>())
     {
@@ -86,7 +86,6 @@ inline bool Schema::validate(Value& root, std::vector<std::string>& errors)
         return false;
     }
 
-    appliedDefaults_.clear();
     std::vector<std::string> missing;
 
     for (const auto& spec : specs_)
@@ -113,7 +112,6 @@ inline bool Schema::validate(Value& root, std::vector<std::string>& errors)
             Value def = std::move(*spec->getDefault());
             std::string path(spec->getPath());
             setValueByPath(obj, path, std::move(def));
-            appliedDefaults_.emplace(path, *spec->getDefault());
         }
     }
 

@@ -108,8 +108,12 @@ inline Value Parser::parse()
 {
     Value result;
 
+    if (peek().type == TokenType::Eof)
+    {
+        result = Value{Null{}};
+    }
     // Handle root-level object: "{ name: Alex }"
-    if (peek().type == TokenType::LBrace)
+    else if (peek().type == TokenType::LBrace)
     {
         next();
         result = parseObject();
