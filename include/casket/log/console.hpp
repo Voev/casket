@@ -160,7 +160,7 @@ private:
     {
         if (config_.showTimestamp)
         {
-            auto now = std::chrono::steady_clock::now();
+            auto now = std::chrono::system_clock::now();
             uint64_t timestamp_us =
                 std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch()).count();
 
