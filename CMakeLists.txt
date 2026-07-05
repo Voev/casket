@@ -31,6 +31,8 @@ endif (ENABLE_CODE_COVERAGE)
 add_subdirectory(include)
 add_subdirectory(src)
 
+add_subdirectory(src/db)
+
 # Test options
 if (ENABLE_UNIT_TESTS)
   enable_testing()
