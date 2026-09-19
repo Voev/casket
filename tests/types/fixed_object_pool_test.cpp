@@ -67,7 +67,7 @@ TEST(FixedObjectPoolTest, ConstructorAndDestructor)
     Trackable::resetCounters();
     {
         FixedObjectPool<Trackable> pool(5);
-        EXPECT_EQ(pool.poolSize(), 5);
+        EXPECT_EQ(pool.poolSize(), 0);
         EXPECT_EQ(pool.capacity(), 5);
         EXPECT_EQ(Trackable::constructions, 5);
         EXPECT_EQ(Trackable::destructions, 0);
@@ -427,7 +427,9 @@ TEST(FixedObjectPoolTest, ReleaseAfterReset)
 
     auto* i3 = pool.acquire();
     ASSERT_NE(i3, nullptr);
-    EXPECT_EQ(*i3, 200);
+    EXPECT_EQ(pool.poolSize(), 1u);
+    EXPECT_EQ(pool.available(), 2u);
+    EXPECT_EQ(*i3, 100);
 }
 
 TEST(FixedObjectPoolTest, AcquireAfterResetWithDifferentArgs)

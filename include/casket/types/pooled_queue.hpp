@@ -193,7 +193,7 @@ public:
     /// @return Pair of (pool_size, used_nodes_count)
     std::pair<size_t, size_t> poolStats() const
     {
-        return {pool_.poolSize(), size()};
+        return {pool_.capacity(), size()};
     }
 
 private:
