@@ -37,6 +37,8 @@ private:
     {
         if (arg.size() > 2 && startsWith(arg, kDoublePrefix))
             return arg.substr(2);
+        if (arg.size() > 1 && arg.front() == '-' && arg[1] != '-')
+            return arg.substr(1);
         return arg;
     }
 
@@ -60,9 +62,14 @@ public:
     /// @param option The option.
     void add(Option&& option)
     {
-        auto name = option.getName();
         options_.push_back(std::move(option));
-        optionMap_.insert_or_assign(std::move(name), std::prev(options_.end()));
+        auto it = std::prev(options_.end());
+
+        for (const auto& name : it->getNames())
+        {
+            ThrowIfTrue(optionMap_.count(name) > 0, "Option '{}' is already registered", name);
+            optionMap_.insert_or_assign(name, it);
+        }
     }
 
     /// @brief Parses command-line arguments.
@@ -143,7 +150,14 @@ public:
         {
             std::stringstream ss;
 
-            ss << "  " << kDoublePrefix << option.getName();
+            ss << "  ";
+            const auto& names = option.getNames();
+            for (std::size_t i = 0; i < names.size(); ++i)
+            {
+                if (i > 0)
+                    ss << ", ";
+                ss << (names[i].size() == 1 ? kSinglePrefix : kDoublePrefix) << names[i];
+            }
 
             if (option.minTokens() > 0)
             {
@@ -151,10 +165,11 @@ public:
             }
 
             auto optionInfo = ss.str();
+            constexpr std::size_t kColumnWidth = 25;
             os << optionInfo;
-            for (unsigned pad = 25 - static_cast<unsigned>(optionInfo.size()); pad > 0; --pad)
+            if (optionInfo.size() < kColumnWidth)
             {
-                os.put(' ');
+                os << std::string(kColumnWidth - optionInfo.size(), ' ');
             }
 
             os << option.getDescription() << "\n";
@@ -192,7 +207,7 @@ private:
 
         for (auto arg = begin; arg != end; arg = std::next(arg))
         {
-            if (arg->size() > 2 && startsWith(*arg, kDoublePrefix))
+            if (arg->size() > 1 && arg->front() == '-')
             {
                 auto assignPosition = arg->find_first_of('=');
                 if (assignPosition != std::string::npos)
@@ -205,6 +220,19 @@ private:
             result.push_back(std::string(*arg));
         }
         return result;
+    }
+
+    /// @brief Checks whether an argument looks like the start of a new option.
+    ///        "--xxx"    -> всегда true
+    ///        "-x"       -> true, только если "x" зарегистрирован как опция
+    ///        "-5", "-"  -> false (можно использовать как значение)
+    bool isOptionStart(const std::string& arg) const // <-- ДОБАВЛЕНО
+    {
+        if (arg.size() < 2 || arg.front() != '-')
+            return false;
+        if (startsWith(arg, kDoublePrefix))
+            return true;
+        return optionMap_.count(trimDashes(arg)) > 0;
     }
 
     /// @brief Processes preprocessed arguments to consume.
@@ -227,16 +255,16 @@ private:
 
                 if (maxTokens == 0)
                 {
-                    if (nextArg != end && !startsWith(*nextArg, "--"))
+                    if (nextArg != end && !isOptionStart(*nextArg))
                     {
-                        throw RuntimeError("Option '{}' does not accept any values, but got '{}'", optionName,
-                                           *nextArg);
+                        throw RuntimeError(
+                            "Option '{}' does not accept any values, but got '{}'", optionName, *nextArg);
                     }
 
                     if (minTokens > 0)
                     {
-                        throw RuntimeError("Option '{}' requires at least {} value(s), but maxTokens is 0", optionName,
-                                           minTokens);
+                        throw RuntimeError(
+                            "Option '{}' requires at least {} value(s), but maxTokens is 0", optionName, minTokens);
                     }
 
                     option->consume({});
@@ -246,7 +274,7 @@ private:
 
                 std::vector<nonstd::string_view> values;
 
-                while (nextArg != end && values.size() < maxTokens && !startsWith(*nextArg, "--"))
+                while (nextArg != end && values.size() < maxTokens && !isOptionStart(*nextArg))
                 {
                     values.push_back(*nextArg);
                     ++nextArg;
@@ -254,14 +282,14 @@ private:
 
                 if (values.size() < minTokens)
                 {
-                    throw RuntimeError("Option '{}' requires at least {} value(s), got {}", optionName, minTokens,
-                                       values.size());
+                    throw RuntimeError(
+                        "Option '{}' requires at least {} value(s), got {}", optionName, minTokens, values.size());
                 }
 
                 if (values.size() > maxTokens)
                 {
-                    throw RuntimeError("Option '{}' accepts at most {} value(s), got {}", optionName, maxTokens,
-                                       values.size());
+                    throw RuntimeError(
+                        "Option '{}' accepts at most {} value(s), got {}", optionName, maxTokens, values.size());
                 }
 
                 option->consume(nonstd::span<const nonstd::string_view>(values));
@@ -291,7 +319,15 @@ private:
                 os << "[ ";
             }
 
-            os << kDoublePrefix << option.getName();
+            const auto& names = option.getNames();
+            for (std::size_t i = 0; i < names.size(); ++i)
+            {
+                if (i > 0)
+                {
+                    os << " | ";
+                }
+                os << (names[i].size() == 1 ? kSinglePrefix : kDoublePrefix) << names[i];
+            }
 
             if (option.minTokens() > 0)
             {
