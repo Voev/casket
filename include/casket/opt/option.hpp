@@ -25,21 +25,38 @@ class Option final
 
 public:
     Option(std::string name)
-        : name_(std::move(name))
-        , valueHandler_(std::make_shared<UntypedValueHandler>())
-        , isRequired_(false)
-        , isUsed_(false)
+        : Option(std::initializer_list<std::string>{std::move(name)}, nullptr)
     {
-        ThrowIfTrue(name_.empty(), "Empty option name");
     }
 
     Option(std::string name, std::shared_ptr<OptionValueHandler> valueSemantic)
-        : name_(std::move(name))
-        , valueHandler_(valueSemantic)
+        : Option(std::initializer_list<std::string>{std::move(name)}, std::move(valueSemantic))
+    {
+    }
+
+    Option(std::initializer_list<std::string> names)
+        : Option(names, nullptr)
+    {
+    }
+
+    Option(std::initializer_list<std::string> names, std::shared_ptr<OptionValueHandler> valueSemantic)
+        : valueHandler_(valueSemantic ? std::move(valueSemantic) : std::make_shared<UntypedValueHandler>())
+
         , isRequired_(false)
         , isUsed_(false)
     {
-        ThrowIfTrue(name_.empty(), "Empty option name");
+        ThrowIfTrue(names.size() == 0, "Empty option name list");
+
+        for (const auto& n : names)
+        {
+            ThrowIfTrue(n.empty(), "Empty option name");
+
+            names_.push_back(n);
+        }
+
+        for (std::size_t i = 0; i < names_.size(); ++i)
+            for (std::size_t j = i + 1; j < names_.size(); ++j)
+                ThrowIfTrue(names_[i] == names_[j], "Duplicate option name '{}'", names_[i]);
     }
 
     ~Option() noexcept
@@ -47,7 +64,7 @@ public:
     }
 
     Option(const Option& other)
-        : name_(other.name_)
+        : names_(other.names_)
         , description_(other.description_)
         , defaultValue_(other.defaultValue_)
         , value_(other.value_)
@@ -58,7 +75,7 @@ public:
     }
 
     Option(Option&& other) noexcept
-        : name_(std::move(other.name_))
+        : names_(std::move(other.names_))
         , description_(std::move(other.description_))
         , defaultValue_(std::move(other.defaultValue_))
         , value_(std::move(other.value_))
@@ -72,7 +89,7 @@ public:
     {
         if (this != &other)
         {
-            name_ = other.name_;
+            names_ = other.names_;
             description_ = other.description_;
             defaultValue_ = other.defaultValue_;
             value_ = other.value_;
@@ -87,7 +104,7 @@ public:
     {
         if (this != &other)
         {
-            name_ = std::move(other.name_);
+            names_ = std::move(other.names_);
             description_ = std::move(other.description_);
             defaultValue_ = std::move(other.defaultValue_);
             value_ = std::move(other.value_);
@@ -110,7 +127,12 @@ public:
 
     const std::string& getName() const noexcept
     {
-        return name_;
+        return names_.front();
+    }
+
+    const std::vector<std::string>& getNames() const noexcept
+    {
+        return names_;
     }
 
     const std::string& getDescription() const noexcept
@@ -120,7 +142,7 @@ public:
 
     void consume(nonstd::span<const nonstd::string_view> arg)
     {
-        ThrowIfTrue(isUsed_, "{}: option has already been processed", name_);
+        ThrowIfTrue(isUsed_, "{}: option has already been processed", getName());
         valueHandler_->parse(value_, arg);
         isUsed_ = true;
     }
@@ -128,7 +150,7 @@ public:
     template <typename T>
     T get() const
     {
-        ThrowIfFalse(value_.has_value(), "{}: no value provided", name_);
+        ThrowIfFalse(value_.has_value(), "{}: no value provided", getName());
         return nonstd::any_cast<T>(value_);
     }
 
@@ -151,7 +173,7 @@ public:
 
         if (isRequired_)
         {
-            ThrowIfTrue(!isUsed_ && !value_.has_value(), "{}: option is required but not provided", name_);
+            ThrowIfTrue(!isUsed_ && !value_.has_value(), "{}: option is required but not provided", getName());
         }
 
         if (valueHandler_)
@@ -171,7 +193,7 @@ public:
     }
 
 private:
-    std::string name_;
+    std::vector<std::string> names_;
     std::string description_;
     nonstd::any defaultValue_;
     nonstd::any value_;
