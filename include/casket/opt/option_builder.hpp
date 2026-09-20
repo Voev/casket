@@ -10,13 +10,24 @@ namespace casket::opt
 class OptionBuilder
 {
 public:
-    explicit OptionBuilder(std::string name)
+    OptionBuilder(std::string name)
         : option_(std::move(name))
     {
     }
 
     OptionBuilder(std::string name, std::shared_ptr<OptionValueHandler> valueHandler)
-        : option_(std::move(name), valueHandler)
+        : option_(std::move(name), std::move(valueHandler))
+    {
+    }
+
+    OptionBuilder(std::initializer_list<std::string> names)
+        : option_(names)
+    {
+    }
+
+    OptionBuilder(std::initializer_list<std::string> names,
+                  std::shared_ptr<OptionValueHandler> valueHandler)
+        : option_(names, std::move(valueHandler))
     {
     }
 
