@@ -48,14 +48,14 @@ public:
         level_.store(level, std::memory_order_relaxed);
     }
 
+    inline bool isEnabled(LogLevel level) const noexcept
+    {
+        return level <= getLevel();
+    }
+
     template <typename... Args>
     bool logf(const LogLevel& level, const char* format, Args&&... args)
     {
-        if (level < getLevel())
-        {
-            return false;
-        }
-
         LogRecord record(level);
         record.format(format, std::forward<Args>(args)...);
 
@@ -137,7 +137,7 @@ inline const char* getFileName(const char* path)
     do                                                                                                                 \
     {                                                                                                                  \
         auto& _logger = casket::AsyncLogger::getInstance();                                                            \
-        if ((level) <= _logger.getLevel())                                                                             \
+        if (_logger.isEnabled(level))                                                                                  \
         {                                                                                                              \
             _logger.logf(level, fmt, ##__VA_ARGS__);                                                                   \
         }                                                                                                              \
@@ -154,7 +154,7 @@ inline const char* getFileName(const char* path)
 #define CSK_LOG_DEBUG(fmt, ...) CSK_LOG_IMPL(casket::LogLevel::DEBUG, fmt, ##__VA_ARGS__)
 #else
 #define CSK_LOG_EMERGENCY(fmt, ...)                                                                                    \
-    CSK_LOG_IMPL(casket::LogLevel::EMERGENCY "[%s:%d] " fmt, casket::log_detail::getFileName(__FILE__), __LINE__,      \
+    CSK_LOG_IMPL(casket::LogLevel::EMERGENCY, "[%s:%d] " fmt, casket::log_detail::getFileName(__FILE__), __LINE__,     \
                  ##__VA_ARGS__)
 #define CSK_LOG_ALERT(fmt, ...)                                                                                        \
     CSK_LOG_IMPL(casket::LogLevel::ALERT, "[%s:%d] " fmt, casket::log_detail::getFileName(__FILE__), __LINE__,         \
