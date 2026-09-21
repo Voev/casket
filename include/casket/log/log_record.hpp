@@ -95,9 +95,22 @@ struct LogRecord
     }
 
     template <typename... Args>
-    void format(const char* format, Args&&... args)
+    void format(const char* fmt, Args&&... args)
     {
-        int written = snprintf(data_, MAX_MESSAGE_SIZE, format, std::forward<Args>(args)...);
+        static_assert(std::is_same_v<std::decay_t<decltype(*fmt)>, char>,
+                    "format must be a C string");
+
+        int written = 0;
+
+        if constexpr (sizeof...(Args) == 0)
+        {
+            written = std::snprintf(data_, MAX_MESSAGE_SIZE, "%s", fmt);
+        }
+        else
+        {
+            written = std::snprintf(data_, MAX_MESSAGE_SIZE, fmt,
+                                    std::forward<Args>(args)...);
+        }
 
         if (written < 0)
         {
