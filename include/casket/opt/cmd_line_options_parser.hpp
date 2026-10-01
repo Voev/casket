@@ -223,10 +223,9 @@ private:
     }
 
     /// @brief Checks whether an argument looks like the start of a new option.
-    ///        "--xxx"    -> всегда true
-    ///        "-x"       -> true, только если "x" зарегистрирован как опция
-    ///        "-5", "-"  -> false (можно использовать как значение)
-    bool isOptionStart(const std::string& arg) const // <-- ДОБАВЛЕНО
+    /// @param arg The argument to test.
+    /// @return true if @p arg looks like the start of an option, false otherwise.
+    bool isOptionStart(const std::string& arg) const
     {
         if (arg.size() < 2 || arg.front() != '-')
             return false;

@@ -107,7 +107,7 @@ public:
         {
             construct_error(std::move(other.storage_.error));
         }
-        other.has_value_ = false; // other теперь в "пустом" состоянии
+        other.has_value_ = false;
     }
 
     ~Result()
