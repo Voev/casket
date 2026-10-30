@@ -62,6 +62,27 @@ public:
         return had_space;
     }
 
+    // @brief Adds an element only if the buffer has free space.
+    ///
+    /// Unlike @ref push, this method never overwrites existing elements.
+    /// If the buffer is full, @p t is discarded and the buffer state is unchanged.
+    ///
+    /// @param[in] t Element to add (will be moved if possible)
+    /// @return true if @p t was added, false if the buffer was full
+    ///
+    /// @note noexcept if T's move assignment is noexcept
+    bool tryPush(T t) noexcept(std::is_nothrow_move_assignable_v<T>)
+    {
+        if (full())
+        {
+            return false;
+        }
+
+        storage_[write_] = std::move(t);
+        write_ = next(write_);
+        return true;
+    }
+
     /// @brief Removes the oldest element from the buffer
     /// @return true if an element was removed, false if buffer was empty
     bool pop() noexcept
