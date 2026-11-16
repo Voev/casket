@@ -1,10 +1,12 @@
-
 #pragma once
 #include <atomic>
-#include <memory>
-#include <vector>
-#include <functional>
+#include <array>
+#include <cassert>
+#include <cstdint>
 #include <thread>
+#include <chrono>
+#include <stdexcept>
+#include <vector>
 
 namespace casket
 {
@@ -13,152 +15,191 @@ class RCU final
 {
 public:
     using Epoch = uint64_t;
+    using Token = uint64_t;
 
+    static constexpr uint32_t kMaxThreads = 256;
+    static constexpr uint64_t kCntThrOffline = UINT64_MAX;
+    static constexpr uint64_t kCntMax = UINT64_MAX - 1;
     RCU() noexcept
-        : globalEpoch_(0)
+        : token_(0)
+        , numThreads_(0)
+        , ackedToken_(kCntMax)
     {
-        readerCounters_[0].store(0, std::memory_order_relaxed);
-        readerCounters_[1].store(0, std::memory_order_relaxed);
+        for (auto& c : qsbrCnt_)
+            c.store(0, std::memory_order_relaxed);
+        for (auto& b : regBitmap_)
+            b.store(0, std::memory_order_relaxed);
     }
 
-    ~RCU() noexcept
-    {
-    }
+    ~RCU() noexcept = default;
 
-    Epoch readLock() noexcept
+    void threadRegister(uint32_t threadId)
     {
-        Epoch epoch;
-        int counterIndex;
+        if (threadId >= kMaxThreads)
+            throw std::out_of_range("RCU: thread_id out of range");
 
-        while (true)
+        uint32_t idx = threadId >> 6; // / 64
+        uint32_t bit = threadId & 63; // % 64
+        uint64_t oldBmap = regBitmap_[idx].load(std::memory_order_relaxed);
+
+        if (oldBmap & (1ULL << bit))
+            return;
+
+        uint64_t newBmap;
+        do
         {
-            epoch = globalEpoch_.load(std::memory_order_acquire);
-            counterIndex = static_cast<int>(epoch & 1);
+            newBmap = oldBmap | (1ULL << bit);
+        } while (!regBitmap_[idx].compare_exchange_weak(
+            oldBmap, newBmap, std::memory_order_release, std::memory_order_relaxed));
 
-            readerCounters_[counterIndex].fetch_add(1, std::memory_order_acquire);
+        numThreads_.fetch_add(1, std::memory_order_relaxed);
+    }
 
-            if (globalEpoch_.load(std::memory_order_acquire) == epoch)
-            {
-                return epoch;
-            }
+    void threadUnregister(uint32_t threadId)
+    {
+        if (threadId >= kMaxThreads)
+            return;
 
-            readerCounters_[counterIndex].fetch_sub(1, std::memory_order_release);
+        uint32_t idx = threadId >> 6;
+        uint32_t bit = threadId & 63;
+        uint64_t oldBmap = regBitmap_[idx].load(std::memory_order_relaxed);
+
+        if (!(oldBmap & (1ULL << bit)))
+            return;
+
+        uint64_t newBmap;
+        do
+        {
+            newBmap = oldBmap & ~(1ULL << bit);
+        } while (!regBitmap_[idx].compare_exchange_weak(
+            oldBmap, newBmap, std::memory_order_release, std::memory_order_relaxed));
+
+        numThreads_.fetch_sub(1, std::memory_order_relaxed);
+    }
+
+    void threadOnline(uint32_t threadId) noexcept
+    {
+        assert(threadId < kMaxThreads && "threadOnline: invalid thread id");
+
+        const uint64_t cur = qsbrCnt_[threadId].load(std::memory_order_relaxed);
+        assert((cur == 0 || cur == kCntThrOffline) &&
+               "threadOnline called while thread is already online and holds a snapshot");
+
+        Token t = token_.load(std::memory_order_acquire);
+        qsbrCnt_[threadId].store(t, std::memory_order_release);
+    }
+
+    void threadOffline(uint32_t threadId) noexcept
+    {
+        qsbrCnt_[threadId].store(kCntThrOffline, std::memory_order_release);
+    }
+
+    void quiescent(uint32_t threadId) noexcept
+    {
+        Token t = token_.load(std::memory_order_acquire);
+        if (t != qsbrCnt_[threadId].load(std::memory_order_relaxed))
+        {
+            qsbrCnt_[threadId].store(t, std::memory_order_release);
         }
     }
 
-    void readUnlock(Epoch epoch) noexcept
+    Token startGracePeriod() noexcept
     {
-        int counterIndex = static_cast<int>(epoch & 1);
-        readerCounters_[counterIndex].fetch_sub(1, std::memory_order_release);
+        return token_.fetch_add(1, std::memory_order_release) + 1;
     }
 
-    void synchronize() noexcept
+    bool checkGracePeriod(Token token, bool wait) noexcept
     {
-        auto oldEpoch = globalEpoch_.load(std::memory_order_acquire);
-        auto newEpoch = oldEpoch + 1;
+        int spin = 0;
+        while (true)
+        {
+            uint64_t ackedToken = kCntMax;
+            bool allPassed = true;
 
-        globalEpoch_.store(newEpoch, std::memory_order_release);
+            for (uint32_t i = 0; i < kBitmapWords; ++i)
+            {
+                uint64_t bmap = regBitmap_[i].load(std::memory_order_acquire);
+                uint32_t baseId = i << 6;
 
-        waitForReaders(static_cast<int>(oldEpoch & 1));
+                while (bmap)
+                {
+                    uint32_t bit = __builtin_ctzll(bmap);
+                    uint32_t tid = baseId + bit;
+
+                    uint64_t c = qsbrCnt_[tid].load(std::memory_order_acquire);
+
+                    if (c != kCntThrOffline && c < token)
+                    {
+                        allPassed = false;
+                        if (!wait)
+                            return false;
+                        bmap = regBitmap_[i].load(std::memory_order_acquire);
+                        if (bmap & (1ULL << bit))
+                        {
+                            // still waiting
+                        }
+                        else
+                        {
+                            goto retry_outer;
+                        }
+                    }
+
+                    if (c != kCntThrOffline && ackedToken > c)
+                        ackedToken = c;
+
+                    bmap &= ~(1ULL << bit);
+                }
+            }
+
+            if (allPassed)
+            {
+                if (ackedToken != kCntMax)
+                    ackedToken_.store(ackedToken, std::memory_order_relaxed);
+                return true;
+            }
+
+        retry_outer:
+            if (spin < 64)
+            {
+                ++spin;
+                std::this_thread::yield();
+            }
+            else
+            {
+                std::this_thread::sleep_for(std::chrono::microseconds(50));
+            }
+        }
     }
 
-    uint64_t getEpoch() const noexcept
+    void synchronize(uint32_t callerThreadId = kInvalidThread) noexcept
     {
-        return globalEpoch_.load(std::memory_order_relaxed);
+        const bool wasRegistered = (callerThreadId != kInvalidThread);
+
+        if (wasRegistered)
+            threadOffline(callerThreadId);
+
+        Token t = startGracePeriod();
+        checkGracePeriod(t, true);
+
+        if (wasRegistered)
+            threadOnline(callerThreadId);
+    }
+
+    static constexpr uint32_t kInvalidThread = UINT32_MAX;
+
+    Epoch getEpoch() const noexcept
+    {
+        return token_.load(std::memory_order_relaxed);
     }
 
 private:
-    void waitForReaders(int epoch_index) noexcept
-    {
-        while (true)
-        {
-            int count = readerCounters_[epoch_index].load(std::memory_order_acquire);
-            if (count == 0)
-            {
-                break;
-            }
-            std::this_thread::yield();
-        }
-    }
+    static constexpr uint32_t kBitmapWords = (kMaxThreads + 63) / 64;
 
-    alignas(64) std::atomic<uint64_t> globalEpoch_;
-    alignas(64) std::atomic<int32_t> readerCounters_[2];
-};
-
-template <typename T>
-class RCUReadHandle final
-{
-public:
-    explicit RCUReadHandle(T* data, RCU& rcu)
-        : data_(data)
-        , rcu_(rcu)
-        , epoch_(rcu_.readLock())
-    {
-    }
-
-    ~RCUReadHandle()
-    {
-        if (data_ != nullptr)
-        {
-            rcu_.readUnlock(epoch_);
-        }
-    }
-
-    RCUReadHandle(const RCUReadHandle&) = delete;
-    RCUReadHandle& operator=(const RCUReadHandle&) = delete;
-
-    RCUReadHandle(RCUReadHandle&& other) noexcept
-        : data_(std::exchange(other.data_, nullptr))
-        , rcu_(other.rcu_)
-        , epoch_(other.epoch_)
-    {
-    }
-
-    RCUReadHandle& operator=(RCUReadHandle&& other) noexcept
-    {
-        if (this != &other)
-        {
-            reset();
-            data_ = std::exchange(other.data_, nullptr);
-            rcu_ = other.rcu_;
-            epoch_ = other.epoch_;
-        }
-        return *this;
-    }
-
-    T* get() const noexcept
-    {
-        return data_;
-    }
-
-    T* operator->() const noexcept
-    {
-        return data_;
-    }
-
-    T& operator*() const noexcept
-    {
-        return *data_;
-    }
-
-    explicit operator bool() const noexcept
-    {
-        return data_ != nullptr;
-    }
-
-    void reset() noexcept
-    {
-        if (data_ != nullptr)
-        {
-            rcu_.readUnlock(epoch_);
-            data_ = nullptr;
-        }
-    }
-
-private:
-    T* data_;
-    RCU& rcu_;
-    RCU::Epoch epoch_;
+    alignas(64) std::atomic<Token> token_;
+    alignas(64) std::atomic<uint32_t> numThreads_;
+    alignas(64) std::atomic<uint64_t> ackedToken_;
+    alignas(64) std::array<std::atomic<uint64_t>, kMaxThreads> qsbrCnt_;
+    alignas(64) std::array<std::atomic<uint64_t>, kBitmapWords> regBitmap_;
 };
 
 } // namespace casket
