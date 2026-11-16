@@ -13,7 +13,8 @@ public:
     static_assert(std::is_trivially_copy_assignable<T>::value, "T must satisfy is_trivially_copy_assignable");
 
     SequenceLock()
-        : seq_(0)
+        : value_{}
+        , seq_{0}
     {
     }
 
@@ -24,10 +25,9 @@ public:
         do
         {
             seq0 = seq_.load(std::memory_order_acquire);
-            std::atomic_signal_fence(std::memory_order_acq_rel);
             copy = value_;
-            std::atomic_signal_fence(std::memory_order_acq_rel);
-            seq1 = seq_.load(std::memory_order_acquire);
+            std::atomic_signal_fence(std::memory_order_acquire);
+            seq1 = seq_.load(std::memory_order_relaxed);
         } while (seq0 != seq1 || seq0 & 1);
         return copy;
     }
@@ -35,10 +35,9 @@ public:
     void store(const T& desired) noexcept
     {
         std::size_t seq0 = seq_.load(std::memory_order_relaxed);
-        seq_.store(seq0 + 1, std::memory_order_release);
-        std::atomic_signal_fence(std::memory_order_acq_rel);
+        seq_.store(seq0 + 1, std::memory_order_relaxed);
+        std::atomic_signal_fence(std::memory_order_release);
         value_ = desired;
-        std::atomic_signal_fence(std::memory_order_acq_rel);
         seq_.store(seq0 + 2, std::memory_order_release);
     }
 

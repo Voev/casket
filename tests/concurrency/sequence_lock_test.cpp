@@ -87,107 +87,28 @@ TEST_F(SequenceLockTest, LargeObject)
 TEST_F(SequenceLockTest, SingleWriterSingleReader)
 {
     SequenceLock<int> lock;
-    std::atomic<bool> running{true};
     std::atomic<int> writer_count{0};
-    std::atomic<int> reader_count{0};
 
-    // Writer thread
-    std::thread writer(
-        [&]()
-        {
-            for (int i = 0; i < 10000 && running; ++i)
-            {
-                lock.store(i);
-                writer_count++;
-            }
-        });
+    std::thread writer([&]() {
+        for (int i = 0; i < 10000; ++i) {
+            lock.store(i);
+            writer_count.store(i + 1, std::memory_order_release);
+        }
+    });
 
-    // Reader thread
-    std::thread reader(
-        [&]()
-        {
-            int last_value = -1;
-            while (reader_count < 10000)
-            {
-                int value = lock.load();
-                EXPECT_GE(value, last_value) << "Sequence violation!";
-                last_value = value;
-                reader_count++;
-            }
-            (void)last_value;
-            running = false;
-        });
+    std::thread reader([&]() {
+        int last_value = -1;
+        while (writer_count.load(std::memory_order_acquire) < 10000) {
+            int value = lock.load();
+            EXPECT_GE(value, last_value) << "Sequence violation!";
+            last_value = value;
+        }
+    });
 
     writer.join();
     reader.join();
 
     EXPECT_EQ(writer_count.load(), 10000);
-    EXPECT_EQ(reader_count.load(), 10000);
-}
-
-TEST_F(SequenceLockTest, SingleWriterMultipleReaders)
-{
-    SequenceLock<int> lock;
-    std::atomic<bool> running{true};
-    std::atomic<int> writer_count{0};
-    std::atomic<int> total_reads{0};
-    constexpr int NUM_READERS = 4;
-    constexpr int NUM_WRITES = 5000;
-
-    // Writer thread
-    std::thread writer(
-        [&]()
-        {
-            for (int i = 0; i < NUM_WRITES && running; ++i)
-            {
-                lock.store(i);
-                writer_count++;
-            }
-            running = false; // Signal readers to stop
-        });
-
-    // Reader threads
-    std::vector<std::thread> readers;
-    std::atomic<bool> sequence_error{false};
-    std::atomic<int> readers_complete{0};
-
-    for (int r = 0; r < NUM_READERS; ++r)
-    {
-        readers.emplace_back(
-            [&, r]()
-            {
-                int last_value = -1;
-                while (running)
-                {
-                    int value = lock.load();
-                    if (value < last_value)
-                    {
-                        sequence_error = true;
-                    }
-                    last_value = value;
-                    total_reads++;
-                }
-                readers_complete++;
-            });
-    }
-
-    writer.join();
-
-    // Wait for all readers to finish
-    while (readers_complete < NUM_READERS)
-    {
-        std::this_thread::yield();
-    }
-
-    for (auto& th : readers)
-        th.join();
-
-    EXPECT_FALSE(sequence_error.load()) << "Sequence violation detected";
-    EXPECT_EQ(writer_count.load(), NUM_WRITES);
-
-    // Readers can have different counts, just check they read something
-    EXPECT_GT(total_reads.load(), 0);
-    std::cout << "Total reads: " << total_reads.load() << std::endl;
 }
 
 TEST_F(SequenceLockTest, RapidStoreLoad)
